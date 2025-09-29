@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Resume Schema",
+  "type": "object",
+  "properties": {
+    "personalDetails": {
+      "type": "object",
+      "properties": {
+        "basicDetails": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "mobile": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "address": { "type": "string" },
+            "hometown": { "type": "string" },
+            "dateOfBirth": { "type": "string", "format": "date" },
+            "onlineProfiles": {
+              "type": "object",
+              "properties": {
+                "linkedIn": { "type": "string", "format": "uri" },
+                "gitHub": { "type": "string", "format": "uri" },
+                "portfolio": { "type": "string", "format": "uri" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["name", "email"]
+        },
+        "moreDetails": {
+          "type": "object",
+          "properties": {
+            "gender": { "type": "string" },
+            "maritalStatus": { "type": "string" },
+            "category": { "type": "string", "enum": ["General", "SC", "ST", "OBC", "Others"] },
+            "differentlyAbled": { "type": "boolean" },
+            "disabilityType": { "type": "string" },
+            "disabilityAssistance": { "type": "string" },
+            "careerBreak": { "type": "boolean" },
+            "reasonOfBreak": { "type": "string" },
+            "breakStartedFrom": { "type": "string", "format": "date" },
+            "breakEndedIn": { "type": "string", "format": "date" },
+            "isBreakOngoing": { "type": "boolean" },
+            "workPermits": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "nationality": { "type": "string" },
+            "passportNumber": { "type": "string" },
+            "visaStatus": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "careerDetails": {
+      "type": "object",
+      "properties": {
+        "keySkills": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "industry": { "type": "string" },
+        "department": { "type": "string" },
+        "roleCategory": { "type": "string" },
+        "jobRole": { "type": "string" },
+        "desiredJobType": { "type": "string" },
+        "desiredEmploymentType": { "type": "string" },
+        "preferredShift": { "type": "string" },
+        "preferredWorkLocation": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "noticePeriod": { "type": "string" },
+        "expectedSalary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "employment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "companyName": { "type": "string" },
+          "jobTitle": { "type": "string" },
+          "joiningDate": { "type": "string", "format": "date" },
+          "leavingDate": { "type": "string", "format": "date" },
+          "currentlyWorking": { "type": "boolean" },
+          "jobProfile": { "type": "string" },
+          "skillsUsed": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "employmentType": { "type": "string" }
+        },
+        "required": ["companyName", "jobTitle", "joiningDate"]
+      }
+    },
+    "education": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "degree": { "type": "string" },
+          "institute": { "type": "string" },
+          "course": { "type": "string" },
+          "specialization": { "type": "string" },
+          "courseType": { "type": "string" },
+          "fromDate": { "type": "string", "format": "date" },
+          "toDate": { "type": "string", "format": "date" },
+          "isCurrentlyStudying": { "type": "boolean" }
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "during": { "type": "string" },
+          "client": { "type": "string" },
+          "duration": { "type": "string" },
+          "details": { "type": "string" }
+        }
+      }
+    },
+    "certifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "provider": { "type": "string" },
+          "certificationURL": { "type": "string", "format": "uri" },
+          "validityFrom": { "type": "string", "format": "date" },
+          "validityTo": { "type": "string", "format": "date" },
+          "isValidOngoing": { "type": "boolean" }
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "language": { "type": "string" },
+          "proficiency": { "type": "string", "title": "Fluency", "enum": ["Beginner", "Intermediate", "Advanced", "Native"] },
+          "read": { "type": "boolean" },
+          "write": { "type": "boolean" },
+          "speak": { "type": "boolean" }
+        }
+      }
+    },
+    "onlineProfiles": {
+      "type": "object",
+      "properties": {
+        "linkedIn": { "type": "string", "format": "uri" },
+        "gitHub": { "type": "string", "format": "uri" },
+        "portfolio": { "type": "string", "format": "uri" }
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "relationship": { "type": "string" },
+          "contact": { "type": "string" }
+        }
+      }
+    },
+    "achievements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "publications": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "hobbies": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "trainings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "provider": { "type": "string" },
+          "year": { "type": "string", "format": "date", "pattern": "^(\\d{4})$" }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+} 
