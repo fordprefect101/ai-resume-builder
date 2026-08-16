@@ -82,11 +82,14 @@ def apply_project_enrichment(payload: dict, project_id: str, enrichment: dict) -
     for project in inventory.get("projects") or []:
         if project.get("id") == project_id:
             updated = dict(project)
-            updated["categories"] = enrichment.get("categories") or []
-            updated["skills"] = enrichment.get("skills") or []
+            if "categories" in enrichment:
+                updated["categories"] = enrichment.get("categories") or []
+            if "skills" in enrichment:
+                updated["skills"] = enrichment.get("skills") or []
+            if "bullets" in enrichment:
+                updated["bullets"] = enrichment.get("bullets") or updated.get("bullets") or []
             projects.append(updated)
         else:
             projects.append(project)
     inventory["projects"] = projects
     return {**payload, "inventory": inventory}
-

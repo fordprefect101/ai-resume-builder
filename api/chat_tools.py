@@ -5,7 +5,7 @@ from resume_ops import (
     add_project,
     apply_project_enrichment,
 )
-from enrichment import enrich_project
+from enrichment import enrich_project, polish_project_bullets
 
 TOOL_DEFINITIONS = [
     {
@@ -112,7 +112,12 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
             p for p in new_payload["inventory"]["projects"] if p["id"] == new_id
         )
         enrichment = enrich_project(project)
+        polished = polish_project_bullets(project)
+        enrichment = {**enrichment, **polished}
         new_payload = apply_project_enrichment(new_payload, new_id, enrichment)
-        return new_payload, {"ok": True, "projectId": new_id, "enrichment": enrichment}
-
+        return new_payload, {
+            "ok": True,
+            "projectId": new_id,
+            "enrichment": enrichment,
+        }
     raise ValueError(f"unknown tool: {name}")

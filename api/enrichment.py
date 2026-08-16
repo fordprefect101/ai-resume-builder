@@ -59,3 +59,51 @@ def enrich_project(project: dict) -> dict:
         "categories": [str(c) for c in categories][:8],
         "skills": [str(s) for s in skills][:12],
     }
+
+def polish_project_bullets(project: dict) -> dict:
+    """
+    Turn rough notes into ATS-style bullets.
+    Does not invent employers, metrics, or technologies the user did not mention.
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"bullets": list(project.get("bullets") or [])}
+
+    prompt = {
+        "name": project.get("name", ""),
+        "description": project.get("description", ""),
+        "technologies": project.get("technologies") or [],
+        "rawBullets": project.get("bullets") or [],
+    }
+
+    response = client.responses.create(
+        model=MODEL,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "You polish resume PROJECT bullets for ATS-friendly scanning. "
+                    "Return ONLY valid JSON: {\"bullets\": string[]}. "
+                    "Rules: "
+                    "- Start with strong action verbs. "
+                    "- Be concrete and scannable; prefer impact + tech when the user stated them. "
+                    "- Do NOT invent metrics, employers, tools, or outcomes not in the input. "
+                    "- Do NOT write education or personal-detail content. "
+                    "- Keep 2-6 bullets. Preserve the user's meaning. "
+                    "- Plain text only; no markdown."
+                ),
+            },
+            {"role": "user", "content": json.dumps(prompt)},
+        ],
+        text={"format": {"type": "json_object"}},
+    )
+
+    data = json.loads(response.output_text)
+    bullets = data.get("bullets") or []
+    if not isinstance(bullets, list):
+        bullets = project.get("bullets") or []
+
+    cleaned = [str(b).strip() for b in bullets if str(b).strip()]
+    if not cleaned:
+        cleaned = [str(b).strip() for b in (project.get("bullets") or []) if str(b).strip()]
+
+    return {"bullets": cleaned[:6]}

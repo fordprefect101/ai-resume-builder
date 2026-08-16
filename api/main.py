@@ -17,7 +17,7 @@ from resume_ops import (
     add_project,
     apply_project_enrichment,
 )
-from enrichment import enrich_project
+from enrichment import enrich_project, polish_project_bullets
 from chat import run_chat
 from undo import push_undo, pop_undo
 from pdf_import import import_pdf_bytes, PdfImportError
@@ -237,6 +237,8 @@ def tool_add_project(session_id: str, body: AddProjectBody):
                         if p["id"] == new_id
                     )
                     enrichment = enrich_project(project)
+                    polished = polish_project_bullets(project)
+                    enrichment = {**enrichment, **polished}
                     new_payload = apply_project_enrichment(
                         new_payload, new_id, enrichment
                     )
