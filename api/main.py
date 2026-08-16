@@ -17,6 +17,7 @@ from resume_ops import (
     apply_project_enrichment,
 )
 from enrichment import enrich_project
+from chat import run_chat
 
 load_dotenv()
 
@@ -50,6 +51,10 @@ class AddProjectBody(BaseModel):
     url: str = ""
     projectId: str | None = None
     enrich: bool = True
+
+class ChatBody(BaseModel):
+    sessionId: str
+    message: str
 
 @app.get("/health")
 def health():
@@ -249,4 +254,47 @@ def tool_add_project(session_id: str, body: AddProjectBody):
         "version": saved[2],
         "appliedTool": "add_project",
         "projectId": new_id,
+    }
+
+@app.post("/chat")
+def chat(body: ChatBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload
+                FROM resume_snapshots
+                WHERE session_id = %s
+                """,
+                (body.sessionId,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            try:
+                result = run_chat(row[0], body.message)
+            except Exception as err:
+                raise HTTPException(status_code=500, detail=str(err))
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(result["payload"]), body.sessionId),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "assistantMessage": result["assistantMessage"],
+        "toolsCalled": result["toolsCalled"],
     }
