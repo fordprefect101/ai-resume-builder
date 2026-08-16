@@ -1,4 +1,6 @@
 {
+  "schemaVersion": 2,
+  "inventory": {
     "basics": {
       "fullName": "Ada Lovelace",
       "email": "ada@example.com",
@@ -9,8 +11,7 @@
         { "label": "GitHub", "url": "https://github.com/ada" }
       ]
     },
-    "summary": "Engineer focused on practical systems and clear communication.",
-    "skills": ["TypeScript", "PostgreSQL", "React"],
+    "skills": ["Python", "FastAPI", "PostgreSQL"],
     "experience": [
       {
         "id": "exp_chaishots",
@@ -20,21 +21,26 @@
         "startDate": "2024-06",
         "endDate": "2024-09",
         "bullets": [
-          "Built an internal API used by the product team daily.",
-          "Reduced report generation time by caching frequent queries."
-        ]
+          "Built an internal API used by the product team daily."
+        ],
+        "categories": ["software-engineering", "backend"],
+        "skills": ["Python", "PostgreSQL"],
+        "status": "active"
       }
     ],
     "projects": [
       {
         "id": "proj_music",
         "name": "Music Transcription Tool",
-        "description": "Converts short audio clips into readable note sequences.",
+        "description": "Converts audio clips into readable note sequences.",
         "technologies": ["Python", "FastAPI"],
         "bullets": [
-          "Shipped a local demo that processes 30-second clips end to end."
+          "Built an end-to-end pipeline for processing 30-second clips."
         ],
-        "url": ""
+        "url": "",
+        "categories": ["audio", "side-project"],
+        "skills": ["Python", "FastAPI"],
+        "status": "active"
       }
     ],
     "education": [
@@ -45,7 +51,8 @@
         "location": "Example City",
         "startDate": "2021-09",
         "endDate": "2025-05",
-        "details": []
+        "details": [],
+        "status": "active"
       }
     ],
     "achievements": [
@@ -53,7 +60,18 @@
         "id": "ach_1",
         "title": "Hackathon Finalist",
         "date": "2024-03",
-        "description": "Built a resume voice intake prototype in 24 hours."
+        "description": "Built a resume voice intake prototype.",
+        "status": "active"
       }
     ]
+  },
+  "resume": {
+    "title": "General Resume",
+    "summary": "Engineer focused on practical systems and clear communication.",
+    "includedExperienceIds": ["exp_chaishots"],
+    "includedProjectIds": ["proj_music"],
+    "includedEducationIds": ["edu_uni"],
+    "includedAchievementIds": ["ach_1"],
+    "sectionOrder": ["experience", "projects", "education", "achievements"]
   }
+}

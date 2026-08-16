@@ -1,20 +1,29 @@
-# Resume payload shape (v1)
+# Resume payload shape (v2)
 
-Stored in `resume_snapshots.payload`. Example: `backend/resume-schema.example.json`.
+Stored in `resume_snapshots.payload`. Example: `api/resume-schema.example.json`.
+
+**Idea:** `inventory` is the career truth. `resume` is a view (what to show + order). Soft remove = drop an id from an inclusion list; do not delete the inventory item.
 
 ## Top level
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `basics` | object | yes | Identity + contact |
-| `summary` | string | no | Empty string OK |
-| `skills` | string[] | yes | Use `[]` if none |
-| `experience` | object[] | yes | Use `[]` if none |
-| `projects` | object[] | yes | Use `[]` if none |
-| `education` | object[] | yes | Use `[]` if none |
-| `achievements` | object[] | yes | Use `[]` if none |
+| `schemaVersion` | number | yes | Use `2` |
+| `inventory` | object | yes | Canonical career data |
+| `resume` | object | yes | Current resume view |
 
-## `basics`
+## `inventory`
+
+| Field | Type | Required |
+|-------|------|----------|
+| `basics` | object | yes |
+| `skills` | string[] | yes (`[]` OK) |
+| `experience` | object[] | yes |
+| `projects` | object[] | yes |
+| `education` | object[] | yes |
+| `achievements` | object[] | yes |
+
+### `inventory.basics`
 
 | Field | Type | Required |
 |-------|------|----------|
@@ -24,53 +33,76 @@ Stored in `resume_snapshots.payload`. Example: `backend/resume-schema.example.js
 | `location` | string | no |
 | `links` | `{ label, url }[]` | yes (`[]` OK) |
 
-## `experience[]`
+### Shared item fields
+
+Most inventory items include:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | string | **Required**, stable (for tools) |
+| `status` | `"active"` \| `"archived"` | Default `active` |
+| `categories` | string[] | Enrichment (Phase 2); `[]` OK |
+| `skills` | string[] | Enrichment; `[]` OK |
+
+### `inventory.experience[]`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `id` | string | **yes** — stable id for AI tools |
+| `id` | string | yes |
 | `company` | string | yes |
 | `title` | string | yes |
 | `location` | string | no |
-| `startDate` | string | no — prefer `YYYY-MM` |
-| `endDate` | string | no — omit or `""` if current |
-| `bullets` | string[] | yes (`[]` OK) |
+| `startDate` | string | no (`YYYY-MM`) |
+| `endDate` | string | no |
+| `bullets` | string[] | yes |
+| `categories` | string[] | yes (`[]` OK) |
+| `skills` | string[] | yes (`[]` OK) |
+| `status` | string | yes |
 
-## `projects[]`
+### `inventory.projects[]`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `id` | string | **yes** |
+| `id` | string | yes |
 | `name` | string | yes |
 | `description` | string | no |
-| `technologies` | string[] | yes (`[]` OK) |
-| `bullets` | string[] | yes (`[]` OK) |
+| `technologies` | string[] | yes |
+| `bullets` | string[] | yes |
 | `url` | string | no |
+| `categories` | string[] | yes |
+| `skills` | string[] | yes |
+| `status` | string | yes |
 
-## `education[]`
+### `inventory.education[]` / `achievements[]`
 
-| Field | Type | Required |
-|-------|------|----------|
-| `id` | string | **yes** |
-| `institution` | string | yes |
-| `degree` | string | yes |
-| `location` | string | no |
-| `startDate` | string | no |
-| `endDate` | string | no |
-| `details` | string[] | yes (`[]` OK) |
+Same pattern: stable `id`, content fields, `status`. Enrichment optional.
 
-## `achievements[]`
+## `resume` (view)
 
-| Field | Type | Required |
-|-------|------|----------|
-| `id` | string | **yes** |
-| `title` | string | yes |
-| `date` | string | no |
-| `description` | string | no |
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `title` | string | yes | e.g. "General Resume" |
+| `summary` | string | no | Per-resume blurb |
+| `includedExperienceIds` | string[] | yes | Subset of inventory ids |
+| `includedProjectIds` | string[] | yes | |
+| `includedEducationIds` | string[] | yes | |
+| `includedAchievementIds` | string[] | yes | |
+| `sectionOrder` | string[] | yes | e.g. `experience`, `projects`, … |
 
-## Out of scope for v1
+## Soft vs hard removal
 
-- Master profile vs multiple resumes
-- Version history / undo ops
-- Section ordering metadata
-- Strict server-side validation (next optional step)
+| Intent | Action |
+|--------|--------|
+| Hide from this resume | Remove id from the matching `included*Ids` |
+| Keep but retire | Set `status: "archived"` and exclude from view |
+| Truly erase | Rare; separate hard-delete tool later |
+
+## Intake (later)
+
+- **Voice cold start** and **PDF import** both produce this v2 shape.
+- First resume view usually includes all `active` inventory ids.
+
+## Out of scope for Phase 0
+
+- Multi-resume rows in DB (Phase 7)
+- Server validation / tools / enrichment
