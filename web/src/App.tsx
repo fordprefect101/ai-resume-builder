@@ -38,7 +38,7 @@ function App() {
       setVoiceStatus('Connecting…')
       const holder: { current: RealtimeHandles | null } = { current: null }
   
-      const handles = await startRealtimeSession(async (event) => {
+      const handles = await startRealtimeSession(sessionIdRef.current, async (event) => {
         const type = String(event.type ?? '')
         if (
           type.includes('transcript') ||

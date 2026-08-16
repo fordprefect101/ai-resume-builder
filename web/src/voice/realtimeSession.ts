@@ -7,9 +7,10 @@ export type RealtimeHandles = {
 }
 
 export async function startRealtimeSession(
+  sessionId: string,
   onEvent: (event: Record<string, unknown>) => void
 ): Promise<RealtimeHandles> {
-  const tokenRes = await fetch(`${API_BASE}/realtime/token`)
+  const tokenRes = await fetch(`${API_BASE}/realtime/token?sessionId=${encodeURIComponent(sessionId)}`)
   if (!tokenRes.ok) throw new Error(`token failed: ${tokenRes.status}`)
   const tokenData = await tokenRes.json()
   const ephemeralKey = tokenData.value as string
@@ -28,6 +29,9 @@ export async function startRealtimeSession(
   pc.addTrack(ms.getTracks()[0])
 
   const dc = pc.createDataChannel('oai-events')
+  dc.addEventListener('open', () => {
+    dc.send(JSON.stringify({ type: 'response.create' }))
+  })
   dc.addEventListener('message', (e) => {
     try {
       const event = JSON.parse(e.data as string) as Record<string, unknown>

@@ -22,6 +22,7 @@ from chat import run_chat
 from undo import push_undo, pop_undo
 from pdf_import import import_pdf_bytes, PdfImportError
 from realtime import create_realtime_client_secret
+from chat_tools import project_catalog
 
 load_dotenv()
 
@@ -382,18 +383,27 @@ async def import_resume_pdf(file: UploadFile = File(...)):
     }
 
 @app.get("/realtime/token")
-def realtime_token():
+def realtime_token(sessionId: str):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
+                (sessionId,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="not_found")
+
     try:
-        data = create_realtime_client_secret()
+        data = create_realtime_client_secret(project_catalog(row[0]))
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
 
-    # GA response: ephemeral key is usually in "value"
     return {
         "value": data.get("value"),
         "expiresAt": data.get("expires_at"),
         "model": data.get("session", {}).get("model")
         if isinstance(data.get("session"), dict)
         else None,
-        "raw": data,  # keep while debugging; remove later
     }

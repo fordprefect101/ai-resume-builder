@@ -12,7 +12,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini")
 
 
-def create_realtime_client_secret() -> dict:
+def create_realtime_client_secret(project_catalog: list[dict]) -> dict:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
@@ -22,10 +22,25 @@ def create_realtime_client_secret() -> dict:
             "type": "realtime",
             "model": REALTIME_MODEL,
             "instructions": (
-                "You help edit a resume using tools only. "
-                "Prefer soft exclude over deleting. "
-                "Use project ids when calling tools. "
-                "When the user asks to change the resume, call a tool."
+                "You are in EDIT mode for an existing resume. "
+                "Start by greeting briefly and asking what the user wants to "
+                "edit, modify, or change today. Wait for their answer. "
+
+                "The project catalog below is reference data only. "
+                "Use its exact ids when calling project tools. "
+                f"PROJECT CATALOG: {json.dumps(project_catalog)}. "
+
+                "If the user wants to add a project, conduct a short interview. "
+                "Ask one question at a time for: project name, what it does, "
+                "technologies used, then the user's contributions as bullet points. "
+                "Keep asking for additional bullet points until the user clearly says "
+                "they are done with this project (e.g. 'that's it', 'I'm done', "
+                "'nothing else', 'no more bullets'). "
+                "Do not invent facts. Only after they signal they are done, "
+                "call add_project exactly once with all collected bullets. "
+
+                "For existing projects, prefer soft exclude instead of deletion. "
+                "Always use tools for resume mutations."
             ),
             "tools": TOOL_DEFINITIONS,
             "audio": {
