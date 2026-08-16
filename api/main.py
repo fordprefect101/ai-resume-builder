@@ -21,6 +21,7 @@ from enrichment import enrich_project
 from chat import run_chat
 from undo import push_undo, pop_undo
 from pdf_import import import_pdf_bytes, PdfImportError
+from realtime import create_realtime_client_secret
 
 load_dotenv()
 
@@ -378,4 +379,21 @@ async def import_resume_pdf(file: UploadFile = File(...)):
         "payload": saved[1],
         "version": saved[2],
         "extractionMethod": "pdf_upload",
+    }
+
+@app.get("/realtime/token")
+def realtime_token():
+    try:
+        data = create_realtime_client_secret()
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=str(err))
+
+    # GA response: ephemeral key is usually in "value"
+    return {
+        "value": data.get("value"),
+        "expiresAt": data.get("expires_at"),
+        "model": data.get("session", {}).get("model")
+        if isinstance(data.get("session"), dict)
+        else None,
+        "raw": data,  # keep while debugging; remove later
     }
