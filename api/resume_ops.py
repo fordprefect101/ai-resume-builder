@@ -76,3 +76,17 @@ def add_project(
         "resume": resume,
     }, new_id
 
+def apply_project_enrichment(payload: dict, project_id: str, enrichment: dict) -> dict:
+    inventory = dict(payload.get("inventory") or {})
+    projects = []
+    for project in inventory.get("projects") or []:
+        if project.get("id") == project_id:
+            updated = dict(project)
+            updated["categories"] = enrichment.get("categories") or []
+            updated["skills"] = enrichment.get("skills") or []
+            projects.append(updated)
+        else:
+            projects.append(project)
+    inventory["projects"] = projects
+    return {**payload, "inventory": inventory}
+

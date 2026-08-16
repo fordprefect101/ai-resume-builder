@@ -10,7 +10,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Local functions
-from resume_ops import exclude_project_from_resume, include_project_on_resume, add_project
+from resume_ops import (
+    exclude_project_from_resume,
+    include_project_on_resume,
+    add_project,
+    apply_project_enrichment,
+)
+from enrichment import enrich_project
 
 load_dotenv()
 
@@ -43,6 +49,7 @@ class AddProjectBody(BaseModel):
     bullets: list[str] = []
     url: str = ""
     projectId: str | None = None
+    enrich: bool = True
 
 @app.get("/health")
 def health():
@@ -210,6 +217,15 @@ def tool_add_project(session_id: str, body: AddProjectBody):
                     url=body.url,
                     project_id=body.projectId,
                 )
+                if body.enrich:
+                    project = next(
+                        p for p in new_payload["inventory"]["projects"]
+                        if p["id"] == new_id
+                    )
+                    enrichment = enrich_project(project)
+                    new_payload = apply_project_enrichment(
+                        new_payload, new_id, enrichment
+                    )
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err))
 
