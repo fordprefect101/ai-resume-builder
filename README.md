@@ -1,6 +1,6 @@
 # AI Resume Builder
 
-**Rebuild from scratch.** Implementation code was cleared; planning and architecture docs remain.
+**Rebuild from scratch.** Planning docs + a Vite frontend (`web/`) and a Python API home (`api/`).
 
 **Where we are / what’s next:** [docs/PROGRESS.md](./docs/PROGRESS.md)
 
@@ -9,17 +9,25 @@
 | Doc | Purpose |
 |-----|---------|
 | [docs/PROGRESS.md](./docs/PROGRESS.md) | What we’ve done, decisions, next steps |
+| [docs/AI_IMPLEMENTATION_PLAN.md](./docs/AI_IMPLEMENTATION_PLAN.md) | Phased AI-first plan (inventory, tools, chat, Realtime) |
 | [DESIGN.md](./DESIGN.md) | Architecture north-star, voice/state, product intent |
-| [docs/IMPLEMENTATION_PHASES.md](./docs/IMPLEMENTATION_PHASES.md) | Phased scope — shipped vs deferred, routes, file map |
-| [docs/boundary-map.md](./docs/boundary-map.md) | Layer boundaries (API, services, domain, persistence, worker, frontend) |
-| [docs/HOSTING.md](./docs/HOSTING.md) | Deploy frontend, API, worker, Supabase |
-| [docs/async-failure-playbook.md](./docs/async-failure-playbook.md) | Async/outbox failure handling |
-| [docs/phase-memory-intelligence.md](./docs/phase-memory-intelligence.md) | Future memory / retrieval design (not shipped) |
+| [docs/resume-payload.md](./docs/resume-payload.md) | Resume JSON payload shape (v1 → v2 in Phase 0) |
+| [docs/IMPLEMENTATION_PHASES.md](./docs/IMPLEMENTATION_PHASES.md) | Phased scope — reference; partly outdated vs rebuild |
+| [Resume_Builder_Product_and_Technical_Architecture.docx](./Resume_Builder_Product_and_Technical_Architecture.docx) | Product + technical architecture |
+
+## Layout
+
+```text
+api/     FastAPI backend (in progress) — Postgres schema + env
+web/     Vite + React + TypeScript frontend
+docs/    Planning + payload contract
+```
 
 ## Rebuild order (suggested)
 
-1. Read **DESIGN.md** + **IMPLEMENTATION_PHASES.md**
-2. Scaffold backend (`Express`, env, core routes) per phase matrix
-3. Scaffold React app under `src/react/` per navigation sketch in phases doc
-4. Add persistence + auth when P2/P3 milestones need them
-5. Deploy using **HOSTING.md**
+See [docs/AI_IMPLEMENTATION_PLAN.md](./docs/AI_IMPLEMENTATION_PLAN.md). Short version:
+
+1. ~~FastAPI CRUD + JSON Load/Save~~ (done)
+2. Payload v2: inventory + resume view
+3. Deterministic tools → enrichment on add → text chat → Realtime (same tools)
+4. Product UI only after AI path is solid

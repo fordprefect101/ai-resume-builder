@@ -1,0 +1,59 @@
+{
+    "basics": {
+      "fullName": "Ada Lovelace",
+      "email": "ada@example.com",
+      "phone": "+1 555 0100",
+      "location": "London, UK",
+      "links": [
+        { "label": "LinkedIn", "url": "https://linkedin.com/in/ada" },
+        { "label": "GitHub", "url": "https://github.com/ada" }
+      ]
+    },
+    "summary": "Engineer focused on practical systems and clear communication.",
+    "skills": ["TypeScript", "PostgreSQL", "React"],
+    "experience": [
+      {
+        "id": "exp_chaishots",
+        "company": "ChaiShots",
+        "title": "Software Engineering Intern",
+        "location": "Remote",
+        "startDate": "2024-06",
+        "endDate": "2024-09",
+        "bullets": [
+          "Built an internal API used by the product team daily.",
+          "Reduced report generation time by caching frequent queries."
+        ]
+      }
+    ],
+    "projects": [
+      {
+        "id": "proj_music",
+        "name": "Music Transcription Tool",
+        "description": "Converts short audio clips into readable note sequences.",
+        "technologies": ["Python", "FastAPI"],
+        "bullets": [
+          "Shipped a local demo that processes 30-second clips end to end."
+        ],
+        "url": ""
+      }
+    ],
+    "education": [
+      {
+        "id": "edu_uni",
+        "institution": "Example University",
+        "degree": "B.S. Computer Science",
+        "location": "Example City",
+        "startDate": "2021-09",
+        "endDate": "2025-05",
+        "details": []
+      }
+    ],
+    "achievements": [
+      {
+        "id": "ach_1",
+        "title": "Hackathon Finalist",
+        "date": "2024-03",
+        "description": "Built a resume voice intake prototype in 24 hours."
+      }
+    ]
+  }

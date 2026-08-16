@@ -2,6 +2,12 @@ node_modules/
 dist/
 dist-react/
 .env
-backend/.env
 *.log
 .DS_Store
+
+# Python API
+api/.env
+api/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
