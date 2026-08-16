@@ -18,6 +18,7 @@ from resume_ops import (
 )
 from enrichment import enrich_project
 from chat import run_chat
+from undo import push_undo, pop_undo
 
 load_dotenv()
 
@@ -131,6 +132,8 @@ def tool_exclude_project(session_id: str, body: ExcludeProjectBody):
             except KeyError:
                 raise HTTPException(status_code=404, detail="project_not_found")
 
+            push_undo(cur, session_id, row[0])
+
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -173,6 +176,8 @@ def tool_include_project(session_id: str, body: ExcludeProjectBody):
                 new_payload = include_project_on_resume(row[0], body.projectId)
             except KeyError:
                 raise HTTPException(status_code=404, detail="project_not_found")
+
+            push_undo(cur, session_id, row[0])
 
             cur.execute(
                 """
@@ -234,6 +239,8 @@ def tool_add_project(session_id: str, body: AddProjectBody):
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err))
 
+            push_undo(cur, session_id, row[0])
+
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -260,6 +267,13 @@ def tool_add_project(session_id: str, body: AddProjectBody):
 def chat(body: ChatBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
+            try:
+                result = run_chat(row[0], body.message)
+            except Exception as err:
+                raise HTTPException(status_code=500, detail=str(err))
+            if result["toolsCalled"]:
+                push_undo(cur, body.sessionId, row[0])
+
             cur.execute(
                 """
                 SELECT payload
@@ -297,4 +311,35 @@ def chat(body: ChatBody):
         "version": saved[2],
         "assistantMessage": result["assistantMessage"],
         "toolsCalled": result["toolsCalled"],
+    }
+
+@app.post("/resume/{session_id}/tools/undo")
+def tool_undo(session_id: str):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            previous = pop_undo(cur, session_id)
+            if previous is None:
+                raise HTTPException(status_code=404, detail="nothing_to_undo")
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(previous), session_id),
+            )
+            saved = cur.fetchone()
+            if not saved:
+                raise HTTPException(status_code=404, detail="not_found")
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "undo",
     }
