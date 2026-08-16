@@ -1,18 +1,13 @@
 {
-  "name": "resume-builder-backend",
-  "version": "1.0.0",
-  "description": "Backend server for Resume Builder (OpenAI Realtime API integration)",
-  "main": "server.js",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "socket.io": "^4.7.5",
-    "ws": "^8.17.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "openai": "^4.0.0"
+    "name": "resume-builder-backend",
+    "version": "1.0.0",
+    "description": "Backend API for AI Resume Builder",
+    "main": "server.js",
+    "type": "module",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "express": "^4.21.0"
+    }
   }
-} 
