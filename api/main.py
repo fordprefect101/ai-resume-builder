@@ -1,11 +1,12 @@
 import json
 import os
+import uuid
 from typing import Any
 import psycopg
 
 # Local imports
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -19,6 +20,7 @@ from resume_ops import (
 from enrichment import enrich_project
 from chat import run_chat
 from undo import push_undo, pop_undo
+from pdf_import import import_pdf_bytes, PdfImportError
 
 load_dotenv()
 
@@ -342,4 +344,38 @@ def tool_undo(session_id: str):
         "payload": saved[1],
         "version": saved[2],
         "appliedTool": "undo",
+    }
+
+@app.post("/import-resume-pdf")
+async def import_resume_pdf(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="pdf_required")
+
+    file_bytes = await file.read()
+
+    try:
+        payload = import_pdf_bytes(file_bytes)
+    except PdfImportError as err:
+        raise HTTPException(status_code=err.status_code, detail=err.detail)
+
+    session_id = f"import_{uuid.uuid4().hex[:12]}"
+
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO resume_snapshots (session_id, payload)
+                VALUES (%s, %s::jsonb)
+                RETURNING session_id, payload, version
+                """,
+                (session_id, json.dumps(payload)),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "extractionMethod": "pdf_upload",
     }
