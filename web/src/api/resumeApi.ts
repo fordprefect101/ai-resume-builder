@@ -50,3 +50,42 @@ export async function importResumePdf(file: File): Promise<ResumeResponse> {
   }
   return res.json();
 }
+
+async function postResumeTool(
+  sessionId: string,
+  tool: string,
+  body: unknown
+): Promise<ResumeResponse> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/${tool}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`${tool} failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export function setItemIncluded(
+  sessionId: string,
+  section: string,
+  itemId: string,
+  included: boolean
+): Promise<ResumeResponse> {
+  return postResumeTool(
+    sessionId,
+    included ? 'include_on_resume' : 'exclude_from_resume',
+    { section, itemId }
+  );
+}
+
+export function reorderResumeSections(
+  sessionId: string,
+  sectionOrder: string[]
+): Promise<ResumeResponse> {
+  return postResumeTool(sessionId, 'reorder_sections', { sectionOrder });
+}

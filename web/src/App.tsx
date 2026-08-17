@@ -3,13 +3,21 @@ import {
   getResume,
   importResumePdf,
   putResume,
+  reorderResumeSections,
+  setItemIncluded,
   startIntake,
 } from './api/resumeApi'
+import { ResumeEditor } from './components/ResumeEditor'
+import { ResumePreview } from './components/ResumePreview'
+import {
+  isResumePayload,
+  type ResumePayload,
+} from './types/resume'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
 import { handleToolCallEvent } from './voice/handleRealtimeTools'
 import './App.css'
 
-const EMPTY_PAYLOAD = {
+const EMPTY_PAYLOAD: ResumePayload = {
   schemaVersion: 3,
   intake: { status: 'not_started' },
   inventory: {
@@ -47,6 +55,8 @@ function App() {
   const [payloadText, setPayloadText] = useState(
     JSON.stringify(EMPTY_PAYLOAD, null, 2)
   )
+  const [payload, setPayload] = useState<ResumePayload>(EMPTY_PAYLOAD)
+  const [busyAction, setBusyAction] = useState('')
   const [version, setVersion] = useState<number | null>(null)
   const [status, setStatus] = useState('')
   const voiceRef = useRef<RealtimeHandles | null>(null)
@@ -55,6 +65,14 @@ function App() {
   const pdfInputRef = useRef<HTMLInputElement | null>(null)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
+
+  function applyPayload(nextPayload: unknown) {
+    if (!isResumePayload(nextPayload)) {
+      throw new Error('Server returned an invalid resume payload')
+    }
+    setPayload(nextPayload)
+    setPayloadText(JSON.stringify(nextPayload, null, 2))
+  }
   
   async function handleStartVoice(targetSessionId = sessionIdRef.current) {
     try {
@@ -85,7 +103,7 @@ function App() {
             (result) => {
               const payload = (result as { payload?: unknown })?.payload
               if (payload) {
-                setPayloadText(JSON.stringify(payload, null, 2))
+                applyPayload(payload)
                 setStatus('Updated via voice tool')
                 const intakeStatus = (
                   payload as { intake?: { status?: string } }
@@ -119,7 +137,7 @@ function App() {
       const data = await startIntake()
       setSessionId(data.sessionId)
       sessionIdRef.current = data.sessionId
-      setPayloadText(JSON.stringify(data.payload, null, 2))
+      applyPayload(data.payload)
       setVersion(data.version)
       setScreen('workspace')
       setStatus('Intake session created')
@@ -136,7 +154,7 @@ function App() {
       const data = await importResumePdf(file)
       setSessionId(data.sessionId)
       sessionIdRef.current = data.sessionId
-      setPayloadText(JSON.stringify(data.payload, null, 2))
+      applyPayload(data.payload)
       setVersion(data.version)
       setScreen('workspace')
       setStatus('PDF imported — ready to edit')
@@ -157,7 +175,7 @@ function App() {
     try {
       setStatus('Loading…')
       const data = await getResume(sessionId)
-      setPayloadText(JSON.stringify(data.payload, null, 2))
+      applyPayload(data.payload)
       setVersion(data.version)
       setStatus(`Loaded version ${data.version}`)
     } catch (err) {
@@ -170,12 +188,65 @@ function App() {
       setStatus('Saving…')
       const payload = JSON.parse(payloadText)
       const data = await putResume(sessionId, payload)
+      applyPayload(data.payload)
       setVersion(data.version)
       setStatus(`Saved version ${data.version}`)
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Save failed')
     }
   }
+
+  async function handleToggleItem(
+    section: string,
+    itemId: string,
+    currentlyIncluded: boolean
+  ) {
+    const actionKey = `${section}:${itemId}`
+    try {
+      setBusyAction(actionKey)
+      const data = await setItemIncluded(
+        sessionIdRef.current,
+        section,
+        itemId,
+        !currentlyIncluded
+      )
+      applyPayload(data.payload)
+      setVersion(data.version)
+      setStatus(currentlyIncluded ? 'Item hidden from resume' : 'Item shown on resume')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Could not update item')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
+  async function handleMoveSection(section: string, direction: -1 | 1) {
+    const current = payload.resume.sectionOrder
+    const index = current.indexOf(section)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= current.length) return
+
+    const nextOrder = [...current]
+    const moved = nextOrder[index]
+    nextOrder[index] = nextOrder[target]
+    nextOrder[target] = moved
+
+    try {
+      setBusyAction(`order:${section}`)
+      const data = await reorderResumeSections(
+        sessionIdRef.current,
+        nextOrder
+      )
+      applyPayload(data.payload)
+      setVersion(data.version)
+      setStatus('Section order updated')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Could not reorder sections')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   if (screen === 'landing') {
     return (
       <main className="intake-landing">
@@ -220,50 +291,95 @@ function App() {
   }
 
   return (
-    <main style={{ maxWidth: 720, margin: '2rem auto', fontFamily: 'system-ui' }}>
-      <div className="workspace-heading">
-        <h1>Resume Builder</h1>
-        <button type="button" onClick={() => setScreen('landing')}>
-          Back to start
-        </button>
+    <main className="builder-workspace">
+      <header className="builder-toolbar">
+        <div>
+          <p className="eyebrow">Resume builder</p>
+          <h1>{payload.resume.title || 'General Resume'}</h1>
+        </div>
+        <div className="toolbar-actions">
+          <span className="voice-status">{voiceStatus}</span>
+          {voiceRef.current ? (
+            <button type="button" onClick={handleStopVoice}>
+              Stop voice
+            </button>
+          ) : (
+            <button
+              className="primary-action"
+              type="button"
+              onClick={() => handleStartVoice()}
+            >
+              Start voice
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              handleStopVoice()
+              setScreen('landing')
+            }}
+          >
+            Exit
+          </button>
+        </div>
+      </header>
+
+      <div className="builder-status" role="status">
+        <span>{status || 'All changes are synchronized'}</span>
+        {version !== null && <span>Version {version}</span>}
       </div>
-      <label>
-        Session ID{' '}
-        <input
-          value={sessionId}
-          onChange={(e) => setSessionId(e.target.value)}
+
+      <div className="builder-split">
+        <ResumeEditor
+          payload={payload}
+          busyAction={busyAction}
+          onMoveSection={handleMoveSection}
+          onToggleItem={handleToggleItem}
+          onStartVoice={() => handleStartVoice()}
         />
-      </label>
-      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-        <button type="button" onClick={handleLoad}>
-          Load
-        </button>
-        <button type="button" onClick={handleSave}>
-          Save
-        </button>
+        <section className="preview-pane">
+          <div className="preview-pane-heading">
+            <div>
+              <p className="eyebrow">Live preview</p>
+              <h2>Resume document</h2>
+            </div>
+            <span>Updates automatically</span>
+          </div>
+          <div className="paper-stage">
+            <ResumePreview payload={payload} />
+          </div>
+        </section>
       </div>
-      <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-        <button type="button" onClick={() => handleStartVoice()}>
-          Start voice
-        </button>
-        <button type="button" onClick={handleStopVoice}>
-          Stop voice
-        </button>
-      </div>
-      <p>{voiceStatus}</p>
-      <pre style={{ maxHeight: 160, overflow: 'auto', fontSize: 12 }}>
-        {transcriptLog.join('\n') || 'Transcript events will appear here'}
-      </pre>
-      <p>
-        {status}
-        {version !== null ? ` (v${version})` : ''}
-      </p>
-      <textarea
-        value={payloadText}
-        onChange={(e) => setPayloadText(e.target.value)}
-        rows={28}
-        style={{ width: '100%', fontFamily: 'monospace' }}
-      />
+
+      <details className="developer-tools">
+        <summary>Developer tools</summary>
+        <div className="developer-toolbar">
+          <label>
+            Session ID
+            <input
+              value={sessionId}
+              onChange={(event) => setSessionId(event.target.value)}
+            />
+          </label>
+          <button type="button" onClick={handleLoad}>
+            Load
+          </button>
+          <button type="button" onClick={handleSave}>
+            Save JSON
+          </button>
+        </div>
+        <details>
+          <summary>Realtime event log</summary>
+          <pre>
+            {transcriptLog.join('\n') || 'Transcript events will appear here'}
+          </pre>
+        </details>
+        <textarea
+          value={payloadText}
+          onChange={(event) => setPayloadText(event.target.value)}
+          rows={20}
+        />
+      </details>
     </main>
   )
 }

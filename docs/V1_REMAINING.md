@@ -33,11 +33,14 @@ Cold start when the user has **no** resume yet.
 - Walk list sections (experience, projects, education, achievements) via `add_item`  
 - Dual entry: **voice cold start** vs **PDF upload**, then continue in edit mode  
 
-### 2. Live resume preview
+### 2. Live resume preview — ✅ complete
 
+- Side-by-side structured editor + resume document (desktop)
 - Render the current view from `sectionOrder` + `includedIds` + section items  
-- Replace or sit beside the JSON console as the primary surface  
-- Refresh after tool calls (chat or voice)
+- Section reorder and item show/hide controls persist through generic tools
+- Preview refreshes after editor, voice, load, PDF, and JSON save results
+- Responsive stacked layout on smaller screens
+- JSON console retained under developer tools only
 
 ### 3. Dual-intake UI shell — ✅ complete
 
@@ -78,8 +81,8 @@ Cold start when the user has **no** resume yet.
 
 ## Suggested v1 build order
 
-1. Live preview (makes every tool change visible)  
-2. Intake mode (voice) + dual-intake UI  
+1. ~~Live preview (makes every tool change visible)~~ ✅
+2. ~~Intake mode (voice) + dual-intake UI~~ ✅
 3. PDF → native v3  
 4. Context slicing  
 5. Hardening + optional `reorder_items`  
