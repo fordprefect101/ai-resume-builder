@@ -107,3 +107,94 @@ def polish_project_bullets(project: dict) -> dict:
         cleaned = [str(b).strip() for b in (project.get("bullets") or []) if str(b).strip()]
 
     return {"bullets": cleaned[:6]}
+
+def enrich_experience(experience: dict) -> dict:
+    """Return categories + skills for a job. Do not invent facts."""
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"categories": [], "skills": []}
+
+    prompt = {
+        "company": experience.get("company", ""),
+        "title": experience.get("title", ""),
+        "location": experience.get("location", ""),
+        "startDate": experience.get("startDate", ""),
+        "endDate": experience.get("endDate", ""),
+        "bullets": experience.get("bullets") or [],
+    }
+
+    response = client.responses.create(
+        model=MODEL,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "You classify resume EXPERIENCE (jobs) for retrieval. "
+                    "Return ONLY valid JSON: "
+                    "{\"categories\": string[], \"skills\": string[]}. "
+                    "categories: 2-5 kebab-case themes (e.g. backend, internship). "
+                    "skills: concrete skills implied by the role/bullets. "
+                    "Do not invent employers or work the user did not describe."
+                ),
+            },
+            {"role": "user", "content": json.dumps(prompt)},
+        ],
+        text={"format": {"type": "json_object"}},
+    )
+
+    data = json.loads(response.output_text)
+    categories = data.get("categories") or []
+    skills = data.get("skills") or []
+    if not isinstance(categories, list):
+        categories = []
+    if not isinstance(skills, list):
+        skills = []
+
+    return {
+        "categories": [str(c) for c in categories][:8],
+        "skills": [str(s) for s in skills][:12],
+    }
+
+
+def polish_experience_bullets(experience: dict) -> dict:
+    """ATS-style job bullets from rough notes. No invented metrics."""
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"bullets": list(experience.get("bullets") or [])}
+
+    prompt = {
+        "company": experience.get("company", ""),
+        "title": experience.get("title", ""),
+        "rawBullets": experience.get("bullets") or [],
+    }
+
+    response = client.responses.create(
+        model=MODEL,
+        input=[
+            {
+                "role": "system",
+                "content": (
+                    "You polish resume EXPERIENCE bullets for ATS scanning. "
+                    "Return ONLY valid JSON: {\"bullets\": string[]}. "
+                    "Action verbs, concrete, scannable. "
+                    "Do NOT invent metrics, tools, or outcomes not in the input. "
+                    "Keep 2-6 bullets. Plain text only."
+                ),
+            },
+            {"role": "user", "content": json.dumps(prompt)},
+        ],
+        text={"format": {"type": "json_object"}},
+    )
+
+    data = json.loads(response.output_text)
+    bullets = data.get("bullets") or []
+    if not isinstance(bullets, list):
+        bullets = experience.get("bullets") or []
+
+    cleaned = [str(b).strip() for b in bullets if str(b).strip()]
+    if not cleaned:
+        cleaned = [
+            str(b).strip()
+            for b in (experience.get("bullets") or [])
+            if str(b).strip()
+        ]
+
+    return {"bullets": cleaned[:6]}

@@ -16,8 +16,15 @@ from resume_ops import (
     include_project_on_resume,
     add_project,
     apply_project_enrichment,
+    exclude_experience_from_resume,
+    include_experience_on_resume,
+    add_experience,
+    apply_experience_enrichment,
 )
-from enrichment import enrich_project, polish_project_bullets
+from enrichment import (
+    enrich_project, polish_project_bullets,
+    enrich_experience, polish_experience_bullets,
+    )
 from chat import run_chat
 from undo import push_undo, pop_undo
 from pdf_import import import_pdf_bytes, PdfImportError
@@ -60,6 +67,20 @@ class AddProjectBody(BaseModel):
 class ChatBody(BaseModel):
     sessionId: str
     message: str
+
+class ExcludeExperienceBody(BaseModel):
+    experienceId: str
+
+
+class AddExperienceBody(BaseModel):
+    company: str
+    title: str
+    location: str = ""
+    startDate: str = ""
+    endDate: str = ""
+    bullets: list[str] = []
+    experienceId: str | None = None
+    enrich: bool = True
 
 @app.get("/health")
 def health():
@@ -269,6 +290,167 @@ def tool_add_project(session_id: str, body: AddProjectBody):
         "projectId": new_id,
     }
 
+@app.post("/resume/{session_id}/tools/exclude_experience")
+def tool_exclude_experience(session_id: str, body: ExcludeExperienceBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload
+                FROM resume_snapshots
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            try:
+                new_payload = exclude_experience_from_resume(
+                    row[0], body.experienceId
+                )
+            except KeyError:
+                raise HTTPException(status_code=404, detail="experience_not_found")
+
+            push_undo(cur, session_id, row[0])
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(new_payload), session_id),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "exclude_experience_from_resume",
+        "experienceId": body.experienceId,
+    }
+
+
+@app.post("/resume/{session_id}/tools/include_experience")
+def tool_include_experience(session_id: str, body: ExcludeExperienceBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload
+                FROM resume_snapshots
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            try:
+                new_payload = include_experience_on_resume(
+                    row[0], body.experienceId
+                )
+            except KeyError:
+                raise HTTPException(status_code=404, detail="experience_not_found")
+
+            push_undo(cur, session_id, row[0])
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(new_payload), session_id),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "include_experience_on_resume",
+        "experienceId": body.experienceId,
+    }
+
+
+@app.post("/resume/{session_id}/tools/add_experience")
+def tool_add_experience(session_id: str, body: AddExperienceBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload
+                FROM resume_snapshots
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            try:
+                new_payload, new_id = add_experience(
+                    row[0],
+                    company=body.company,
+                    title=body.title,
+                    location=body.location,
+                    start_date=body.startDate,
+                    end_date=body.endDate,
+                    bullets=body.bullets,
+                    experience_id=body.experienceId,
+                )
+                if body.enrich:
+                    item = next(
+                        e
+                        for e in new_payload["inventory"]["experience"]
+                        if e["id"] == new_id
+                    )
+                    enrichment = enrich_experience(item)
+                    polished = polish_experience_bullets(item)
+                    enrichment = {**enrichment, **polished}
+                    new_payload = apply_experience_enrichment(
+                        new_payload, new_id, enrichment
+                    )
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err))
+
+            push_undo(cur, session_id, row[0])
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(new_payload), session_id),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "add_experience",
+        "experienceId": new_id,
+    }
 @app.post("/chat")
 def chat(body: ChatBody):
     with psycopg.connect(DATABASE_URL) as conn:
