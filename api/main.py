@@ -603,13 +603,6 @@ async def import_resume_pdf(file: UploadFile = File(...)):
         payload = normalize_payload(import_pdf_bytes(file_bytes))
     except PdfImportError as err:
         raise HTTPException(status_code=err.status_code, detail=err.detail) from err
-    payload["intake"] = {
-        "status": "complete",
-        "basicsConfirmed": True,
-        "skillsConfirmed": True,
-        "confirmedSkippedSections": [],
-        "source": "pdf",
-    }
 
     session_id = f"import_{uuid.uuid4().hex[:12]}"
 

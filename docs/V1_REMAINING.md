@@ -48,9 +48,11 @@ Cold start when the user has **no** resume yet.
 - Wired to `/import-resume-pdf` and Realtime intake session  
 - New guest session ids are created by `POST /intake/start`
 
-### 4. PDF import → native v3
+### 4. PDF import → native v3 — ✅ complete
 
-- Emit schemaVersion 3 (`sections` + `includedIds`) directly from `pdf_import`  
+- LLM extraction contract requests schemaVersion 3 directly
+- Deterministic importer emits `sections` + `includedIds` without a v2 intermediate
+- Flat/legacy-like model output is still accepted and normalized into v3
 - Keep `normalize_payload` as a safety net for legacy rows
 
 ### 5. Item order within a section (optional but common)
@@ -83,7 +85,7 @@ Cold start when the user has **no** resume yet.
 
 1. ~~Live preview (makes every tool change visible)~~ ✅
 2. ~~Intake mode (voice) + dual-intake UI~~ ✅
-3. PDF → native v3  
+3. ~~PDF → native v3~~ ✅
 4. Context slicing  
 5. Hardening + optional `reorder_items`  
 
