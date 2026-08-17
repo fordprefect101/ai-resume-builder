@@ -13,8 +13,13 @@ Section field rules (required fields, enrich/polish flags) live in `api/section_
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `schemaVersion` | number | yes | Use `3` |
+| `intake` | object | yes | Intake status + confirmation flags |
 | `inventory` | object | yes | Canonical career data |
 | `resume` | object | yes | Current resume view |
+
+`intake.status` is `not_started`, `in_progress`, or `complete`. Basics and
+skills confirmation flags let intake complete only after those steps and all
+built-in sections have been explicitly addressed.
 
 ## `inventory`
 

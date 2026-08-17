@@ -1,11 +1,17 @@
 import { useRef, useState } from 'react'
-import { getResume, putResume } from './api/resumeApi'
+import {
+  getResume,
+  importResumePdf,
+  putResume,
+  startIntake,
+} from './api/resumeApi'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
 import { handleToolCallEvent } from './voice/handleRealtimeTools'
 import './App.css'
 
 const EMPTY_PAYLOAD = {
   schemaVersion: 3,
+  intake: { status: 'not_started' },
   inventory: {
     basics: {
       fullName: '',
@@ -36,6 +42,7 @@ const EMPTY_PAYLOAD = {
 }
 
 function App() {
+  const [screen, setScreen] = useState<'landing' | 'workspace'>('landing')
   const [sessionId, setSessionId] = useState('demo')
   const [payloadText, setPayloadText] = useState(
     JSON.stringify(EMPTY_PAYLOAD, null, 2)
@@ -45,15 +52,17 @@ function App() {
   const voiceRef = useRef<RealtimeHandles | null>(null)
   const [voiceStatus, setVoiceStatus] = useState('Voice off')
   const [transcriptLog, setTranscriptLog] = useState<string[]>([])
+  const pdfInputRef = useRef<HTMLInputElement | null>(null)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   
-  async function handleStartVoice() {
+  async function handleStartVoice(targetSessionId = sessionIdRef.current) {
     try {
       setVoiceStatus('Connecting…')
+      sessionIdRef.current = targetSessionId
       const holder: { current: RealtimeHandles | null } = { current: null }
   
-      const handles = await startRealtimeSession(sessionIdRef.current, async (event) => {
+      const handles = await startRealtimeSession(targetSessionId, async (event) => {
         const type = String(event.type ?? '')
         if (
           type.includes('transcript') ||
@@ -78,6 +87,14 @@ function App() {
               if (payload) {
                 setPayloadText(JSON.stringify(payload, null, 2))
                 setStatus('Updated via voice tool')
+                const intakeStatus = (
+                  payload as { intake?: { status?: string } }
+                ).intake?.status
+                if (intakeStatus === 'complete') {
+                  setVoiceStatus(
+                    'Intake complete — reconnect voice to continue in edit mode'
+                  )
+                }
               }
             }
           )
@@ -86,9 +103,47 @@ function App() {
   
       holder.current = handles
       voiceRef.current = handles
-      setVoiceStatus('Listening — speak now')
+      setVoiceStatus(
+        handles.mode === 'intake'
+          ? 'Intake listening — speak now'
+          : 'Edit listening — speak now'
+      )
     } catch (err) {
       setVoiceStatus(err instanceof Error ? err.message : 'Voice failed')
+    }
+  }
+
+  async function handleVoiceIntake() {
+    try {
+      setStatus('Creating intake session…')
+      const data = await startIntake()
+      setSessionId(data.sessionId)
+      sessionIdRef.current = data.sessionId
+      setPayloadText(JSON.stringify(data.payload, null, 2))
+      setVersion(data.version)
+      setScreen('workspace')
+      setStatus('Intake session created')
+      await handleStartVoice(data.sessionId)
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Could not start intake')
+    }
+  }
+
+  async function handlePdfSelected(file: File | undefined) {
+    if (!file) return
+    try {
+      setStatus('Importing PDF…')
+      const data = await importResumePdf(file)
+      setSessionId(data.sessionId)
+      sessionIdRef.current = data.sessionId
+      setPayloadText(JSON.stringify(data.payload, null, 2))
+      setVersion(data.version)
+      setScreen('workspace')
+      setStatus('PDF imported — ready to edit')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'PDF import failed')
+    } finally {
+      if (pdfInputRef.current) pdfInputRef.current.value = ''
     }
   }
 
@@ -121,9 +176,57 @@ function App() {
       setStatus(err instanceof Error ? err.message : 'Save failed')
     }
   }
+  if (screen === 'landing') {
+    return (
+      <main className="intake-landing">
+        <section className="intake-card">
+          <p className="eyebrow">Conversational resume builder</p>
+          <h1>How would you like to begin?</h1>
+          <p className="intro">
+            Bring an existing resume, or build one through a guided voice
+            conversation.
+          </p>
+          <div className="intake-actions">
+            <button
+              className="intake-option primary"
+              type="button"
+              onClick={handleVoiceIntake}
+            >
+              <strong>Start from voice</strong>
+              <span>Answer one question at a time</span>
+            </button>
+            <button
+              className="intake-option"
+              type="button"
+              onClick={() => pdfInputRef.current?.click()}
+            >
+              <strong>I have a PDF</strong>
+              <span>Import it and continue in edit mode</span>
+            </button>
+            <input
+              ref={pdfInputRef}
+              hidden
+              type="file"
+              accept="application/pdf,.pdf"
+              onChange={(event) =>
+                handlePdfSelected(event.target.files?.[0])
+              }
+            />
+          </div>
+          {status && <p className="landing-status">{status}</p>}
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main style={{ maxWidth: 720, margin: '2rem auto', fontFamily: 'system-ui' }}>
-      <h1>Resume Builder</h1>
+      <div className="workspace-heading">
+        <h1>Resume Builder</h1>
+        <button type="button" onClick={() => setScreen('landing')}>
+          Back to start
+        </button>
+      </div>
       <label>
         Session ID{' '}
         <input
@@ -140,7 +243,7 @@ function App() {
         </button>
       </div>
       <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-        <button type="button" onClick={handleStartVoice}>
+        <button type="button" onClick={() => handleStartVoice()}>
           Start voice
         </button>
         <button type="button" onClick={handleStopVoice}>

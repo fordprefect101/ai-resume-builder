@@ -13,6 +13,54 @@ export async function runResumeTool(
 ): Promise<unknown> {
   const args = JSON.parse(argsJson || '{}') as Record<string, unknown>
 
+  if (name === 'set_basics') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_basics`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          basics: args.basics ?? {},
+          githubUsername: args.githubUsername ?? '',
+          confirmedEmptyFields: args.confirmedEmptyFields ?? [],
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(`set_basics failed: ${res.status}`)
+    return res.json()
+  }
+
+  if (name === 'set_skills') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_skills`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          skills: args.skills ?? [],
+          confirmedEmpty: args.confirmedEmpty ?? false,
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(`set_skills failed: ${res.status}`)
+    return res.json()
+  }
+
+  if (name === 'complete_intake') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/complete_intake`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          confirmedSkippedSections: args.confirmedSkippedSections ?? [],
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(`complete_intake failed: ${res.status}`)
+    return res.json()
+  }
+
   if (name === 'exclude_from_resume') {
     const res = await fetch(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/exclude_from_resume`,
@@ -48,6 +96,7 @@ export async function runResumeTool(
         body: JSON.stringify({
           section: args.section,
           fields: args.fields ?? {},
+          confirmedEmptyFields: args.confirmedEmptyFields ?? [],
         }),
       }
     )

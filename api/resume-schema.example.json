@@ -1,5 +1,11 @@
 {
   "schemaVersion": 3,
+  "intake": {
+    "status": "complete",
+    "basicsConfirmed": true,
+    "skillsConfirmed": true,
+    "confirmedSkippedSections": []
+  },
   "inventory": {
     "basics": {
       "fullName": "Ada Lovelace",

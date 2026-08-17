@@ -4,6 +4,7 @@ export type ResumeResponse = {
   sessionId: string;
   payload: unknown;
   version: number;
+  mode?: 'intake' | 'edit';
 };
 
 export async function getResume(sessionId: string): Promise<ResumeResponse> {
@@ -25,6 +26,27 @@ export async function putResume(
   });
   if (!res.ok) {
     throw new Error(`PUT failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function startIntake(): Promise<ResumeResponse> {
+  const res = await fetch(`${API_BASE}/intake/start`, { method: 'POST' });
+  if (!res.ok) {
+    throw new Error(`Start intake failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function importResumePdf(file: File): Promise<ResumeResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(`${API_BASE}/import-resume-pdf`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error(`PDF import failed: ${res.status}`);
   }
   return res.json();
 }

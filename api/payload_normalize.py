@@ -22,6 +22,7 @@ def normalize_payload(payload: dict) -> dict:
 def _blank_v3() -> dict:
     return {
         "schemaVersion": 3,
+        "intake": {"status": "not_started"},
         "inventory": {
             "basics": {
                 "fullName": "",
@@ -86,6 +87,7 @@ def _v2_to_v3(payload: dict) -> dict:
 
     return {
         "schemaVersion": 3,
+        "intake": {"status": "not_started"},
         "inventory": {
             "basics": {
                 "fullName": basics.get("fullName") or "",

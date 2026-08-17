@@ -2,7 +2,191 @@
 
 import uuid
 
-from section_registry import get_section_profile
+from section_registry import BUILTIN_SECTION_ORDER, get_section_profile
+
+
+BASIC_FIELDS = ("fullName", "email", "phone", "location")
+
+
+def is_intake_in_progress(payload: dict) -> bool:
+    return (payload.get("intake") or {}).get("status") == "in_progress"
+
+
+def _require_intake(payload: dict) -> None:
+    if not is_intake_in_progress(payload):
+        raise ValueError("intake is not in progress")
+
+
+def _confirmed_empty_fields(
+    empty_fields: list[str], confirmed_empty_fields: list[str] | None
+) -> None:
+    confirmed = set(confirmed_empty_fields or [])
+    unconfirmed = [field for field in empty_fields if field not in confirmed]
+    if unconfirmed:
+        raise ValueError(
+            "confirm intentionally empty fields before saving: "
+            + ", ".join(unconfirmed)
+        )
+
+
+def set_basics(
+    payload: dict,
+    basics: dict,
+    *,
+    github_username: str = "",
+    confirmed_empty_fields: list[str] | None = None,
+) -> dict:
+    """Set basics during intake only, requiring confirmation for every blank field."""
+    _require_intake(payload)
+    if not isinstance(basics, dict):
+        raise ValueError("basics must be an object")
+
+    cleaned = {
+        field: str(basics.get(field) or "").strip() for field in BASIC_FIELDS
+    }
+    links = basics.get("links") or []
+    if not isinstance(links, list):
+        raise ValueError("basics.links must be an array")
+
+    normalized_links: list[dict] = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        label = str(link.get("label") or "").strip()
+        url = str(link.get("url") or "").strip()
+        if label and url:
+            normalized_links.append({"label": label, "url": url})
+
+    username = str(github_username or "").strip().lstrip("@")
+    if "github.com/" in username:
+        username = username.split("github.com/", 1)[1].split("/", 1)[0]
+    if username:
+        normalized_links = [
+            link
+            for link in normalized_links
+            if str(link.get("label") or "").lower() != "github"
+        ]
+        normalized_links.append(
+            {"label": "GitHub", "url": f"https://github.com/{username}"}
+        )
+
+    empty = [field for field, value in cleaned.items() if not value]
+    if not normalized_links:
+        empty.append("links")
+    _confirmed_empty_fields(empty, confirmed_empty_fields)
+
+    inventory = dict(payload.get("inventory") or {})
+    inventory["basics"] = {**cleaned, "links": normalized_links}
+    intake = dict(payload.get("intake") or {})
+    intake["basicsConfirmed"] = True
+    return {**payload, "inventory": inventory, "intake": intake}
+
+
+def set_skills(
+    payload: dict,
+    skills: list[str],
+    *,
+    confirmed_empty: bool = False,
+) -> dict:
+    """Set the flat skills list during intake only."""
+    _require_intake(payload)
+    if not isinstance(skills, list):
+        raise ValueError("skills must be an array")
+
+    cleaned: list[str] = []
+    for skill in skills:
+        value = str(skill).strip()
+        if value and value.lower() not in {s.lower() for s in cleaned}:
+            cleaned.append(value)
+    if not cleaned and not confirmed_empty:
+        raise ValueError("confirm an intentionally empty skills list before saving")
+
+    inventory = dict(payload.get("inventory") or {})
+    inventory["skills"] = cleaned
+    intake = dict(payload.get("intake") or {})
+    intake["skillsConfirmed"] = True
+    return {**payload, "inventory": inventory, "intake": intake}
+
+
+def validate_intake_item_fields(
+    payload: dict,
+    section: str,
+    fields: dict,
+    confirmed_empty_fields: list[str] | None = None,
+) -> None:
+    """Require explicit confirmation for omitted optional interview fields."""
+    if not is_intake_in_progress(payload):
+        return
+
+    profile = get_section_profile(section)
+    intake_fields = profile.get("intakeFields") or (
+        list(profile.get("requiredFields") or [])
+        + [
+            field
+            for field in (profile.get("optionalFields") or [])
+            if field not in {"categories", "skills", "status", "details"}
+        ]
+    )
+    empty = []
+    for field in intake_fields:
+        value = fields.get(field)
+        if value is None or value == "" or value == []:
+            empty.append(field)
+    _confirmed_empty_fields(empty, confirmed_empty_fields)
+
+
+def complete_intake(
+    payload: dict, confirmed_skipped_sections: list[str] | None = None
+) -> dict:
+    """Finish intake after basics, skills, and every built-in section are addressed."""
+    _require_intake(payload)
+    intake = dict(payload.get("intake") or {})
+    if not intake.get("basicsConfirmed"):
+        raise ValueError("basics must be confirmed before completing intake")
+    if not intake.get("skillsConfirmed"):
+        raise ValueError("skills must be confirmed before completing intake")
+
+    skipped = set(confirmed_skipped_sections or [])
+    sections = _sections(payload)
+    unresolved = [
+        section
+        for section in BUILTIN_SECTION_ORDER
+        if not (sections.get(section) or {}).get("items") and section not in skipped
+    ]
+    if unresolved:
+        raise ValueError(
+            "confirm skipped sections before completing intake: "
+            + ", ".join(unresolved)
+        )
+
+    intake["status"] = "complete"
+    intake["confirmedSkippedSections"] = sorted(
+        section for section in skipped if section in BUILTIN_SECTION_ORDER
+    )
+    return {**payload, "intake": intake}
+
+
+def intake_context(payload: dict) -> dict:
+    """Compact persisted state returned to Realtime after each intake tool."""
+    inventory = payload.get("inventory") or {}
+    sections = inventory.get("sections") or {}
+    return {
+        "intake": payload.get("intake") or {},
+        "basics": inventory.get("basics") or {},
+        "skills": inventory.get("skills") or [],
+        "sections": {
+            key: {
+                "title": (bag or {}).get("title") or key,
+                "itemCount": len((bag or {}).get("items") or []),
+                "itemIds": [
+                    item.get("id")
+                    for item in (bag or {}).get("items") or []
+                    if item.get("id")
+                ],
+            }
+            for key, bag in sections.items()
+        },
+    }
 
 
 def _sections(payload: dict) -> dict:

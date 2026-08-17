@@ -1,0 +1,105 @@
+# V1 remaining work
+
+What is left to ship a **conversational resume editor** (not a full product platform).  
+Custom sections, multi-resume views, GitHub matching, and field-update tools are **out of scope for v1** (see v2+ below).
+
+**Last updated:** 17 Aug 2026
+
+---
+
+## Already in place (baseline)
+
+- Persistence (`resume_snapshots`) + short undo stack  
+- Payload **v3**: `inventory.sections` + `resume.includedIds` + `sectionOrder`  
+- `normalize_payload` for older shapes on read/write  
+- Generic tools: `add_item`, `exclude_from_resume`, `include_on_resume`, `reorder_sections`  
+- Registry-driven enrich / bullet polish (`section_registry` + `enrich_section_item`)  
+- Text chat tool loop + Realtime voice harness (**edit** mode)  
+- PDF import endpoint (output may still be older shape; normalize upgrades it)
+
+---
+
+## V1 remaining
+
+### 1. Intake mode (voice + PDF) — ✅ complete
+
+Cold start when the user has **no** resume yet.
+
+- Separate mode-aware Realtime / chat instructions from **edit** mode  
+- Intake-only `set_basics` / `set_skills` / `complete_intake` tools  
+- Explicit confirmation required before optional fields are saved blank  
+- Adaptive skills questions; technical users are asked for GitHub username only  
+- Progressive context returned after every successful intake tool call  
+- Walk list sections (experience, projects, education, achievements) via `add_item`  
+- Dual entry: **voice cold start** vs **PDF upload**, then continue in edit mode  
+
+### 2. Live resume preview
+
+- Render the current view from `sectionOrder` + `includedIds` + section items  
+- Replace or sit beside the JSON console as the primary surface  
+- Refresh after tool calls (chat or voice)
+
+### 3. Dual-intake UI shell — ✅ complete
+
+- Landing / first screen: “I have a PDF” vs “Start from voice”  
+- Wired to `/import-resume-pdf` and Realtime intake session  
+- New guest session ids are created by `POST /intake/start`
+
+### 4. PDF import → native v3
+
+- Emit schemaVersion 3 (`sections` + `includedIds`) directly from `pdf_import`  
+- Keep `normalize_payload` as a safety net for legacy rows
+
+### 5. Item order within a section (optional but common)
+
+- Tool: `reorder_items(section, itemIds)`  
+- Persist order as list order in `inventory.sections[section].items` (or an explicit order field if preferred)
+
+### 6. Basics at intake only (policy lock)
+
+- Capture `inventory.basics` during intake  
+- Confirm no chat/voice tools mutate basics after intake  
+- Document this in prompts so the model does not invent update tools
+
+### 7. Hardening
+
+- Guest session TTL / cleanup  
+- Clearer API errors for unknown section / missing required fields  
+- Optional: soft **archive** tool (status + exclude) if users need “retire” vs hide  
+- Env / `.env.example` kept accurate for chat, enrich, realtime models
+
+### 8. Context slicing (chat)
+
+- Do not send the full career inventory on every turn  
+- Retriever or light filter: name match, section hint, recent items  
+- Prompt gets a slice + inclusion lists; ask clarifying questions when ambiguous
+
+---
+
+## Suggested v1 build order
+
+1. Live preview (makes every tool change visible)  
+2. Intake mode (voice) + dual-intake UI  
+3. PDF → native v3  
+4. Context slicing  
+5. Hardening + optional `reorder_items`  
+
+Preview first is recommended so intake and edit both have something to show.
+
+---
+
+## Explicitly v2+ (not v1)
+
+- Custom sections (`create_section`)  
+- Multi-resume views (one inventory, many resumes)  
+- Source matching (e.g. GitHub ↔ claims)  
+- Field **update** / bullet-edit tools after add  
+- Auth, multi-user, production marketing site  
+
+---
+
+## Related docs
+
+- [resume-payload.md](./resume-payload.md) — v3 payload shape  
+- [AI_IMPLEMENTATION_PLAN.md](./AI_IMPLEMENTATION_PLAN.md) — original phased plan (partially superseded by generic tools)  
+- [PROGRESS.md](./PROGRESS.md) — rebuild status notes  

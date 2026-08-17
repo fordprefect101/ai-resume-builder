@@ -3,6 +3,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081'
 export type RealtimeHandles = {
   pc: RTCPeerConnection
   dc: RTCDataChannel
+  mode: 'intake' | 'edit'
   stop: () => void
 }
 
@@ -14,6 +15,7 @@ export async function startRealtimeSession(
   if (!tokenRes.ok) throw new Error(`token failed: ${tokenRes.status}`)
   const tokenData = await tokenRes.json()
   const ephemeralKey = tokenData.value as string
+  const mode = tokenData.mode === 'intake' ? 'intake' : 'edit'
   if (!ephemeralKey) throw new Error('no ephemeral key in token response')
 
   const pc = new RTCPeerConnection()
@@ -66,5 +68,5 @@ export async function startRealtimeSession(
     audioEl.remove()
   }
 
-  return { pc, dc, stop }
+  return { pc, dc, mode, stop }
 }
