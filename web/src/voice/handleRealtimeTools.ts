@@ -13,42 +13,58 @@ export async function runResumeTool(
 ): Promise<unknown> {
   const args = JSON.parse(argsJson || '{}') as Record<string, unknown>
 
-  if (name === 'exclude_project_from_resume') {
+  if (name === 'exclude_from_resume') {
     const res = await fetch(
-      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/exclude_project`,
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/exclude_from_resume`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: args.projectId }),
+        body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
     )
     if (!res.ok) throw new Error(`exclude failed: ${res.status}`)
     return res.json()
   }
 
-  if (name === 'include_project_on_resume') {
+  if (name === 'include_on_resume') {
     const res = await fetch(
-      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/include_project`,
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/include_on_resume`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: args.projectId }),
+        body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
     )
     if (!res.ok) throw new Error(`include failed: ${res.status}`)
     return res.json()
   }
 
-  if (name === 'add_project') {
+  if (name === 'add_item') {
     const res = await fetch(
-      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/add_project`,
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/add_item`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(args),
+        body: JSON.stringify({
+          section: args.section,
+          fields: args.fields ?? {},
+        }),
       }
     )
-    if (!res.ok) throw new Error(`add_project failed: ${res.status}`)
+    if (!res.ok) throw new Error(`add_item failed: ${res.status}`)
+    return res.json()
+  }
+
+  if (name === 'reorder_sections') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/reorder_sections`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sectionOrder: args.sectionOrder }),
+      }
+    )
+    if (!res.ok) throw new Error(`reorder_sections failed: ${res.status}`)
     return res.json()
   }
 
@@ -61,7 +77,6 @@ export async function handleToolCallEvent(
   event: Record<string, unknown>,
   onResult?: (result: unknown) => void
 ) {
-  // GA-style: arguments finished for a function call
   if (event.type !== 'response.function_call_arguments.done') return
 
   const call: ToolCall = {

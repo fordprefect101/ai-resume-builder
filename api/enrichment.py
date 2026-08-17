@@ -1,7 +1,12 @@
+"""Registry-driven enrichment / bullet polish for list-section items."""
+
 import json
 import os
+
 from openai import OpenAI
 from dotenv import load_dotenv
+
+from section_registry import get_section_profile
 
 load_dotenv()
 
@@ -9,20 +14,47 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MODEL = os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini")
 
 
-def enrich_project(project: dict) -> dict:
+def _item_prompt(item: dict, profile: dict) -> dict:
+    """Compact JSON for the model: label fields + common content fields."""
+    keys = list(profile.get("labelFields") or [])
+    for key in (
+        "description",
+        "technologies",
+        "bullets",
+        "company",
+        "title",
+        "name",
+        "location",
+        "startDate",
+        "endDate",
+        "institution",
+        "degree",
+        "date",
+    ):
+        if key not in keys:
+            keys.append(key)
+    out = {}
+    for key in keys:
+        if key in item:
+            out[key] = item.get(key)
+    return out
+
+
+def enrich_item(section: str, item: dict) -> dict:
     """
-    Returns enrichment fields only: categories, skills.
-    Does not invent ids or overwrite user bullets.
+    Return categories + skills when the section profile allows enrich.
+    No-op (empty) when enrich is false or no API key.
     """
+    profile = get_section_profile(section)
+    if not profile.get("enrich"):
+        return {}
+
     if not os.getenv("OPENAI_API_KEY"):
         return {"categories": [], "skills": []}
 
-    prompt = {
-        "name": project.get("name", ""),
-        "description": project.get("description", ""),
-        "technologies": project.get("technologies") or [],
-        "bullets": project.get("bullets") or [],
-    }
+    kind = profile.get("kind") or section
+    title = profile.get("title") or section
+    prompt = _item_prompt(item, profile)
 
     response = client.responses.create(
         model=MODEL,
@@ -30,110 +62,12 @@ def enrich_project(project: dict) -> dict:
             {
                 "role": "system",
                 "content": (
-                    "You classify resume projects for retrieval and filtering. "
-                    "Return ONLY valid JSON with keys categories (string[]) and skills (string[]). "
-                    "categories: 2-5 short kebab-case themes (e.g. backend, audio, side-project). "
-                    "skills: concrete technologies/skills implied by the project. "
-                    "Do not invent experience the user did not describe."
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(prompt),
-            },
-        ],
-        text={"format": {"type": "json_object"}},
-    )
-
-    raw = response.output_text
-    data = json.loads(raw)
-
-    categories = data.get("categories") or []
-    skills = data.get("skills") or []
-    if not isinstance(categories, list):
-        categories = []
-    if not isinstance(skills, list):
-        skills = []
-
-    return {
-        "categories": [str(c) for c in categories][:8],
-        "skills": [str(s) for s in skills][:12],
-    }
-
-def polish_project_bullets(project: dict) -> dict:
-    """
-    Turn rough notes into ATS-style bullets.
-    Does not invent employers, metrics, or technologies the user did not mention.
-    """
-    if not os.getenv("OPENAI_API_KEY"):
-        return {"bullets": list(project.get("bullets") or [])}
-
-    prompt = {
-        "name": project.get("name", ""),
-        "description": project.get("description", ""),
-        "technologies": project.get("technologies") or [],
-        "rawBullets": project.get("bullets") or [],
-    }
-
-    response = client.responses.create(
-        model=MODEL,
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You polish resume PROJECT bullets for ATS-friendly scanning. "
-                    "Return ONLY valid JSON: {\"bullets\": string[]}. "
-                    "Rules: "
-                    "- Start with strong action verbs. "
-                    "- Be concrete and scannable; prefer impact + tech when the user stated them. "
-                    "- Do NOT invent metrics, employers, tools, or outcomes not in the input. "
-                    "- Do NOT write education or personal-detail content. "
-                    "- Keep 2-6 bullets. Preserve the user's meaning. "
-                    "- Plain text only; no markdown."
-                ),
-            },
-            {"role": "user", "content": json.dumps(prompt)},
-        ],
-        text={"format": {"type": "json_object"}},
-    )
-
-    data = json.loads(response.output_text)
-    bullets = data.get("bullets") or []
-    if not isinstance(bullets, list):
-        bullets = project.get("bullets") or []
-
-    cleaned = [str(b).strip() for b in bullets if str(b).strip()]
-    if not cleaned:
-        cleaned = [str(b).strip() for b in (project.get("bullets") or []) if str(b).strip()]
-
-    return {"bullets": cleaned[:6]}
-
-def enrich_experience(experience: dict) -> dict:
-    """Return categories + skills for a job. Do not invent facts."""
-    if not os.getenv("OPENAI_API_KEY"):
-        return {"categories": [], "skills": []}
-
-    prompt = {
-        "company": experience.get("company", ""),
-        "title": experience.get("title", ""),
-        "location": experience.get("location", ""),
-        "startDate": experience.get("startDate", ""),
-        "endDate": experience.get("endDate", ""),
-        "bullets": experience.get("bullets") or [],
-    }
-
-    response = client.responses.create(
-        model=MODEL,
-        input=[
-            {
-                "role": "system",
-                "content": (
-                    "You classify resume EXPERIENCE (jobs) for retrieval. "
+                    f"You classify resume {title} items (kind={kind}) for retrieval. "
                     "Return ONLY valid JSON: "
-                    "{\"categories\": string[], \"skills\": string[]}. "
-                    "categories: 2-5 kebab-case themes (e.g. backend, internship). "
-                    "skills: concrete skills implied by the role/bullets. "
-                    "Do not invent employers or work the user did not describe."
+                    '{"categories": string[], "skills": string[]}. '
+                    "categories: 2-5 short kebab-case themes. "
+                    "skills: concrete skills implied by the item. "
+                    "Do not invent facts the user did not describe."
                 ),
             },
             {"role": "user", "content": json.dumps(prompt)},
@@ -155,15 +89,24 @@ def enrich_experience(experience: dict) -> dict:
     }
 
 
-def polish_experience_bullets(experience: dict) -> dict:
-    """ATS-style job bullets from rough notes. No invented metrics."""
-    if not os.getenv("OPENAI_API_KEY"):
-        return {"bullets": list(experience.get("bullets") or [])}
+def polish_item_bullets(section: str, item: dict) -> dict:
+    """
+    Polish bullets when the section profile allows polishBullets.
+    No-op (empty dict) when polish is false.
+    """
+    profile = get_section_profile(section)
+    if not profile.get("polishBullets"):
+        return {}
 
+    raw = list(item.get("bullets") or [])
+    if not os.getenv("OPENAI_API_KEY"):
+        return {"bullets": raw}
+
+    kind = profile.get("kind") or section
+    title = profile.get("title") or section
     prompt = {
-        "company": experience.get("company", ""),
-        "title": experience.get("title", ""),
-        "rawBullets": experience.get("bullets") or [],
+        **_item_prompt(item, profile),
+        "rawBullets": raw,
     }
 
     response = client.responses.create(
@@ -172,8 +115,8 @@ def polish_experience_bullets(experience: dict) -> dict:
             {
                 "role": "system",
                 "content": (
-                    "You polish resume EXPERIENCE bullets for ATS scanning. "
-                    "Return ONLY valid JSON: {\"bullets\": string[]}. "
+                    f"You polish resume {title} bullets (kind={kind}) for ATS scanning. "
+                    'Return ONLY valid JSON: {"bullets": string[]}. '
                     "Action verbs, concrete, scannable. "
                     "Do NOT invent metrics, tools, or outcomes not in the input. "
                     "Keep 2-6 bullets. Plain text only."
@@ -187,14 +130,18 @@ def polish_experience_bullets(experience: dict) -> dict:
     data = json.loads(response.output_text)
     bullets = data.get("bullets") or []
     if not isinstance(bullets, list):
-        bullets = experience.get("bullets") or []
+        bullets = raw
 
     cleaned = [str(b).strip() for b in bullets if str(b).strip()]
     if not cleaned:
-        cleaned = [
-            str(b).strip()
-            for b in (experience.get("bullets") or [])
-            if str(b).strip()
-        ]
+        cleaned = [str(b).strip() for b in raw if str(b).strip()]
 
     return {"bullets": cleaned[:6]}
+
+
+def enrich_section_item(section: str, item: dict) -> dict:
+    """Run enrich + polish per registry flags; merge into one patch dict."""
+    enrichment: dict = {}
+    enrichment.update(enrich_item(section, item))
+    enrichment.update(polish_item_bullets(section, item))
+    return enrichment

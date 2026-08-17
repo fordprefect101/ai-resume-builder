@@ -3,7 +3,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from chat_tools import TOOL_DEFINITIONS, project_catalog, execute_tool
+from chat_tools import TOOL_DEFINITIONS, execute_tool, section_catalog
 
 load_dotenv()
 
@@ -25,8 +25,10 @@ CHAT_TOOLS = [
 
 SYSTEM_PROMPT = """You are a resume editing assistant.
 The application owns resume truth. You only change state by calling tools.
-Prefer soft exclude over deleting. Use project ids from the catalog when possible.
-If the user names a project, match it to an id in the catalog.
+Prefer soft exclude over deleting.
+Use section + itemId from the catalog when possible.
+If the user names a job, project, school, or achievement, match it to an id.
+To reorder sections, call reorder_sections with the full sectionOrder.
 After tools run, briefly confirm what changed in plain language.
 """
 
@@ -35,15 +37,15 @@ def run_chat(payload: dict, message: str) -> dict:
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set")
 
-    catalog = project_catalog(payload)
+    catalog = section_catalog(payload)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "Current project catalog (JSON):\n"
-                f"{json.dumps(catalog)}\n\n"
-                f"User request:\n{message}"
+            "Current section catalog (JSON):\n"
+            f"{json.dumps(catalog)}\n\n"
+            f"User request:\n{message}"
             ),
         },
     ]

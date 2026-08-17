@@ -2,34 +2,28 @@ import json
 import os
 import uuid
 from typing import Any
-import psycopg
 
-# Local imports
+import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# Local functions
-from resume_ops import (
-    exclude_project_from_resume,
-    include_project_on_resume,
-    add_project,
-    apply_project_enrichment,
-    exclude_experience_from_resume,
-    include_experience_on_resume,
-    add_experience,
-    apply_experience_enrichment,
-)
-from enrichment import (
-    enrich_project, polish_project_bullets,
-    enrich_experience, polish_experience_bullets,
-    )
 from chat import run_chat
-from undo import push_undo, pop_undo
-from pdf_import import import_pdf_bytes, PdfImportError
+from enrichment import enrich_section_item
+from payload_normalize import normalize_payload
+from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
-from chat_tools import project_catalog
+from resume_ops import (
+    add_item,
+    apply_item_enrichment,
+    exclude_from_resume,
+    get_item,
+    include_on_resume,
+    reorder_sections,
+    section_catalog,
+)
+from undo import pop_undo, push_undo
 
 load_dotenv()
 
@@ -52,35 +46,26 @@ class PutResumeBody(BaseModel):
     payload: Any
 
 
-class ExcludeProjectBody(BaseModel):
-    projectId: str
-
-class AddProjectBody(BaseModel):
-    name: str
-    description: str = ""
-    technologies: list[str] = []
-    bullets: list[str] = []
-    url: str = ""
-    projectId: str | None = None
-    enrich: bool = True
-
 class ChatBody(BaseModel):
     sessionId: str
     message: str
 
-class ExcludeExperienceBody(BaseModel):
-    experienceId: str
+
+class ReorderSectionsBody(BaseModel):
+    sectionOrder: list[str]
 
 
-class AddExperienceBody(BaseModel):
-    company: str
-    title: str
-    location: str = ""
-    startDate: str = ""
-    endDate: str = ""
-    bullets: list[str] = []
-    experienceId: str | None = None
+class SectionItemBody(BaseModel):
+    section: str
+    itemId: str
+
+
+class AddItemBody(BaseModel):
+    section: str
+    fields: dict
+    itemId: str | None = None
     enrich: bool = True
+
 
 @app.get("/health")
 def health():
@@ -106,13 +91,14 @@ def get_resume(session_id: str):
 
     return {
         "sessionId": row[0],
-        "payload": row[1],
+        "payload": normalize_payload(row[1]),
         "version": row[2],
     }
 
 
 @app.put("/resume/{session_id}")
 def put_resume(session_id: str, body: PutResumeBody):
+    payload = normalize_payload(body.payload)
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -125,7 +111,7 @@ def put_resume(session_id: str, body: PutResumeBody):
                       updated_at = now()
                 RETURNING session_id, payload, version
                 """,
-                (session_id, json.dumps(body.payload)),
+                (session_id, json.dumps(payload)),
             )
             row = cur.fetchone()
         conn.commit()
@@ -136,29 +122,30 @@ def put_resume(session_id: str, body: PutResumeBody):
         "version": row[2],
     }
 
-@app.post("/resume/{session_id}/tools/exclude_project")
-def tool_exclude_project(session_id: str, body: ExcludeProjectBody):
+
+@app.post("/resume/{session_id}/tools/exclude_from_resume")
+def tool_exclude_from_resume(session_id: str, body: SectionItemBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
                 (session_id,),
             )
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="not_found")
 
+            previous = normalize_payload(row[0])
             try:
-                new_payload = exclude_project_from_resume(row[0], body.projectId)
-            except KeyError:
-                raise HTTPException(status_code=404, detail="project_not_found")
+                new_payload = exclude_from_resume(
+                    previous, body.section, body.itemId
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, row[0])
-
+            push_undo(cur, session_id, previous)
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -177,33 +164,35 @@ def tool_exclude_project(session_id: str, body: ExcludeProjectBody):
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
-        "appliedTool": "exclude_project_from_resume",
-        "projectId": body.projectId,
+        "appliedTool": "exclude_from_resume",
+        "section": body.section,
+        "itemId": body.itemId,
     }
 
-@app.post("/resume/{session_id}/tools/include_project")
-def tool_include_project(session_id: str, body: ExcludeProjectBody):
+
+@app.post("/resume/{session_id}/tools/include_on_resume")
+def tool_include_on_resume(session_id: str, body: SectionItemBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
                 (session_id,),
             )
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="not_found")
 
+            previous = normalize_payload(row[0])
             try:
-                new_payload = include_project_on_resume(row[0], body.projectId)
-            except KeyError:
-                raise HTTPException(status_code=404, detail="project_not_found")
+                new_payload = include_on_resume(
+                    previous, body.section, body.itemId
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, row[0])
-
+            push_undo(cur, session_id, previous)
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -222,52 +211,45 @@ def tool_include_project(session_id: str, body: ExcludeProjectBody):
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
-        "appliedTool": "include_project_on_resume",
-        "projectId": body.projectId,
+        "appliedTool": "include_on_resume",
+        "section": body.section,
+        "itemId": body.itemId,
     }
 
-@app.post("/resume/{session_id}/tools/add_project")
-def tool_add_project(session_id: str, body: AddProjectBody):
+
+@app.post("/resume/{session_id}/tools/add_item")
+def tool_add_item(session_id: str, body: AddItemBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
                 (session_id,),
             )
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="not_found")
 
+            previous = normalize_payload(row[0])
             try:
-                new_payload, new_id = add_project(
-                    row[0],
-                    name=body.name,
-                    description=body.description,
-                    technologies=body.technologies,
-                    bullets=body.bullets,
-                    url=body.url,
-                    project_id=body.projectId,
+                new_payload, new_id = add_item(
+                    previous,
+                    body.section,
+                    body.fields,
+                    item_id=body.itemId,
                 )
                 if body.enrich:
-                    project = next(
-                        p for p in new_payload["inventory"]["projects"]
-                        if p["id"] == new_id
-                    )
-                    enrichment = enrich_project(project)
-                    polished = polish_project_bullets(project)
-                    enrichment = {**enrichment, **polished}
-                    new_payload = apply_project_enrichment(
-                        new_payload, new_id, enrichment
-                    )
+                    item = get_item(new_payload, body.section, new_id)
+                    enrichment = enrich_section_item(body.section, item)
+                    if enrichment:
+                        new_payload = apply_item_enrichment(
+                            new_payload, body.section, new_id, enrichment
+                        )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
             except ValueError as err:
-                raise HTTPException(status_code=400, detail=str(err))
+                raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, row[0])
-
+            push_undo(cur, session_id, previous)
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -286,150 +268,33 @@ def tool_add_project(session_id: str, body: AddProjectBody):
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
-        "appliedTool": "add_project",
-        "projectId": new_id,
+        "appliedTool": "add_item",
+        "section": body.section,
+        "itemId": new_id,
     }
 
-@app.post("/resume/{session_id}/tools/exclude_experience")
-def tool_exclude_experience(session_id: str, body: ExcludeExperienceBody):
+
+@app.post("/resume/{session_id}/tools/reorder_sections")
+def tool_reorder_sections(session_id: str, body: ReorderSectionsBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
                 (session_id,),
             )
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="not_found")
 
+            previous = normalize_payload(row[0])
             try:
-                new_payload = exclude_experience_from_resume(
-                    row[0], body.experienceId
-                )
-            except KeyError:
-                raise HTTPException(status_code=404, detail="experience_not_found")
-
-            push_undo(cur, session_id, row[0])
-
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
-            )
-            saved = cur.fetchone()
-        conn.commit()
-
-    return {
-        "sessionId": saved[0],
-        "payload": saved[1],
-        "version": saved[2],
-        "appliedTool": "exclude_experience_from_resume",
-        "experienceId": body.experienceId,
-    }
-
-
-@app.post("/resume/{session_id}/tools/include_experience")
-def tool_include_experience(session_id: str, body: ExcludeExperienceBody):
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            try:
-                new_payload = include_experience_on_resume(
-                    row[0], body.experienceId
-                )
-            except KeyError:
-                raise HTTPException(status_code=404, detail="experience_not_found")
-
-            push_undo(cur, session_id, row[0])
-
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
-            )
-            saved = cur.fetchone()
-        conn.commit()
-
-    return {
-        "sessionId": saved[0],
-        "payload": saved[1],
-        "version": saved[2],
-        "appliedTool": "include_experience_on_resume",
-        "experienceId": body.experienceId,
-    }
-
-
-@app.post("/resume/{session_id}/tools/add_experience")
-def tool_add_experience(session_id: str, body: AddExperienceBody):
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            try:
-                new_payload, new_id = add_experience(
-                    row[0],
-                    company=body.company,
-                    title=body.title,
-                    location=body.location,
-                    start_date=body.startDate,
-                    end_date=body.endDate,
-                    bullets=body.bullets,
-                    experience_id=body.experienceId,
-                )
-                if body.enrich:
-                    item = next(
-                        e
-                        for e in new_payload["inventory"]["experience"]
-                        if e["id"] == new_id
-                    )
-                    enrichment = enrich_experience(item)
-                    polished = polish_experience_bullets(item)
-                    enrichment = {**enrichment, **polished}
-                    new_payload = apply_experience_enrichment(
-                        new_payload, new_id, enrichment
-                    )
+                new_payload = reorder_sections(previous, body.sectionOrder)
+            except KeyError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
             except ValueError as err:
-                raise HTTPException(status_code=400, detail=str(err))
+                raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, row[0])
-
+            push_undo(cur, session_id, previous)
             cur.execute(
                 """
                 UPDATE resume_snapshots
@@ -448,58 +313,10 @@ def tool_add_experience(session_id: str, body: AddExperienceBody):
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
-        "appliedTool": "add_experience",
-        "experienceId": new_id,
+        "appliedTool": "reorder_sections",
+        "sectionOrder": new_payload["resume"]["sectionOrder"],
     }
-@app.post("/chat")
-def chat(body: ChatBody):
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as cur:
-            try:
-                result = run_chat(row[0], body.message)
-            except Exception as err:
-                raise HTTPException(status_code=500, detail=str(err))
-            if result["toolsCalled"]:
-                push_undo(cur, body.sessionId, row[0])
 
-            cur.execute(
-                """
-                SELECT payload
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
-                (body.sessionId,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            try:
-                result = run_chat(row[0], body.message)
-            except Exception as err:
-                raise HTTPException(status_code=500, detail=str(err))
-
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(result["payload"]), body.sessionId),
-            )
-            saved = cur.fetchone()
-        conn.commit()
-
-    return {
-        "sessionId": saved[0],
-        "payload": saved[1],
-        "version": saved[2],
-        "assistantMessage": result["assistantMessage"],
-        "toolsCalled": result["toolsCalled"],
-    }
 
 @app.post("/resume/{session_id}/tools/undo")
 def tool_undo(session_id: str):
@@ -532,6 +349,52 @@ def tool_undo(session_id: str):
         "appliedTool": "undo",
     }
 
+
+@app.post("/chat")
+def chat(body: ChatBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
+                (body.sessionId,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            previous_payload = normalize_payload(row[0])
+
+            try:
+                result = run_chat(previous_payload, body.message)
+            except Exception as err:
+                raise HTTPException(status_code=500, detail=str(err)) from err
+
+            if result["toolsCalled"]:
+                push_undo(cur, body.sessionId, previous_payload)
+
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(result["payload"]), body.sessionId),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "assistantMessage": result["assistantMessage"],
+        "toolsCalled": result["toolsCalled"],
+    }
+
+
 @app.post("/import-resume-pdf")
 async def import_resume_pdf(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -540,9 +403,9 @@ async def import_resume_pdf(file: UploadFile = File(...)):
     file_bytes = await file.read()
 
     try:
-        payload = import_pdf_bytes(file_bytes)
+        payload = normalize_payload(import_pdf_bytes(file_bytes))
     except PdfImportError as err:
-        raise HTTPException(status_code=err.status_code, detail=err.detail)
+        raise HTTPException(status_code=err.status_code, detail=err.detail) from err
 
     session_id = f"import_{uuid.uuid4().hex[:12]}"
 
@@ -566,6 +429,7 @@ async def import_resume_pdf(file: UploadFile = File(...)):
         "extractionMethod": "pdf_upload",
     }
 
+
 @app.get("/realtime/token")
 def realtime_token(sessionId: str):
     with psycopg.connect(DATABASE_URL) as conn:
@@ -579,10 +443,11 @@ def realtime_token(sessionId: str):
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
 
+    payload = normalize_payload(row[0])
     try:
-        data = create_realtime_client_secret(project_catalog(row[0]))
+        data = create_realtime_client_secret(section_catalog(payload))
     except Exception as err:
-        raise HTTPException(status_code=500, detail=str(err))
+        raise HTTPException(status_code=500, detail=str(err)) from err
 
     return {
         "value": data.get("value"),
