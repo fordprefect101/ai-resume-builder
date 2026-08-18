@@ -30,20 +30,7 @@ export async function runResumeTool(
   }
 
   if (name === 'set_basics') {
-    const res = await fetch(
-      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_basics`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          basics: args.basics ?? {},
-          githubUsername: args.githubUsername ?? '',
-          confirmedEmptyFields: args.confirmedEmptyFields ?? [],
-        }),
-      }
-    )
-    if (!res.ok) throw new Error(`set_basics failed: ${res.status}`)
-    return res.json()
+    throw new Error('Personal details are edited in the form, not by voice')
   }
 
   if (name === 'set_skills') {

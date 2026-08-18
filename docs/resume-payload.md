@@ -17,9 +17,9 @@ Section field rules (required fields, enrich/polish flags) live in `api/section_
 | `inventory` | object | yes | Canonical career data |
 | `resume` | object | yes | Current resume view |
 
-`intake.status` is `not_started`, `in_progress`, or `complete`. Basics and
-skills confirmation flags let intake complete only after those steps and all
-built-in sections have been explicitly addressed.
+`intake.status` is `not_started`, `in_progress`, or `complete`. `basicsVerified`
+must be true before voice, chat, or list-section tools can run. Skills
+confirmation still applies during voice intake.
 
 ## `inventory`
 
@@ -29,17 +29,19 @@ built-in sections have been explicitly addressed.
 | `skills` | string[] | yes (`[]` OK) |
 | `sections` | object | yes | Map of section key → `{ title, items }` |
 
-`basics` and flat `skills` are **not** list sections for soft-exclude tools. Basics are intake-only.
+`basics` and flat `skills` are **not** list sections for soft-exclude tools. Basics are **manual-only** (never AI-edited) and must be user-verified.
 
 ### `inventory.basics`
 
 | Field | Type | Required |
 |-------|------|----------|
-| `fullName` | string | yes (can be `""`) |
+| `fullName` | string | yes (required to verify) |
 | `email` | string | no |
 | `phone` | string | no |
 | `location` | string | no |
-| `links` | `{ label, url }[]` | yes (`[]` OK) |
+| `links` | `{ label, url }[]` | yes (`[]` OK; LinkedIn/GitHub are stored here) |
+
+Edit basics with `PATCH /resume/{session_id}/basics`, not AI tools. Verification is `intake.basicsVerified`.
 
 ### `inventory.sections[sectionKey]`
 
@@ -142,6 +144,7 @@ Older payloads used top-level `inventory.experience` / `projects` / … arrays a
 
 - **Voice cold start** and **PDF import** should produce **v3**.
 - First resume view usually includes all `active` item ids per section.
+- Voice/PDF content editing waits until `intake.basicsVerified` is true.
 
 ## Out of scope here
 

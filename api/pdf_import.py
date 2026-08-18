@@ -192,7 +192,8 @@ def normalize_imported_payload(data: dict) -> dict:
         "schemaVersion": 3,
         "intake": {
             "status": "complete",
-            "basicsConfirmed": True,
+            "basicsVerified": False,
+            "basicsConfirmed": False,
             "skillsConfirmed": True,
             "confirmedSkippedSections": [
                 section

@@ -13,6 +13,7 @@ Custom sections, multi-resume views, GitHub matching, and field-update tools are
 - Payload **v3**: `inventory.sections` + `resume.includedIds` + `sectionOrder`  
 - `normalize_payload` for older shapes on read/write  
 - Generic tools: `add_item`, `exclude_from_resume`, `include_on_resume`, `reorder_sections`, `reorder_items`  
+- Manual basics form + `intake.basicsVerified` gate (AI cannot mutate basics)  
 - Registry-driven enrich / bullet polish (`section_registry` + `enrich_section_item`)  
 - Text chat tool loop + Realtime voice harness (**edit** mode)  
 - PDF import endpoint (output may still be older shape; normalize upgrades it)
@@ -26,7 +27,8 @@ Custom sections, multi-resume views, GitHub matching, and field-update tools are
 Cold start when the user has **no** resume yet.
 
 - Separate mode-aware Realtime / chat instructions from **edit** mode  
-- Intake-only `set_basics` / `set_skills` / `complete_intake` tools  
+- Intake-only `set_skills` / `complete_intake` tools  
+- Personal details are **manual-only** and must be verified before voice intake starts  
 - Explicit confirmation required before optional fields are saved blank  
 - Adaptive skills questions; technical users are asked for GitHub username only  
 - Progressive context returned after every successful intake tool call  
@@ -62,15 +64,16 @@ Cold start when the user has **no** resume yet.
 - `includedIds[section]` is rewritten to the same relative order  
 - Editor up/down controls, chat, Realtime, and `POST /resume/{session_id}/tools/reorder_items`
 
-### 6. Basics at intake only (policy lock)
+### 6. Manual basics + verification gate — ✅ complete
 
-- Capture `inventory.basics` during intake  
-- Confirm no chat/voice tools mutate basics after intake  
-- Document this in prompts so the model does not invent update tools
+- Basics are edited in the UI only (`PATCH /resume/{session_id}/basics`)  
+- AI tools cannot mutate name, email, phone, location, LinkedIn, or GitHub  
+- `intake.basicsVerified` unlocks voice, chat, and list-section tools  
+- PDF import pre-fills basics but still requires user confirmation  
+- Changing confirmed details locks editing until they are confirmed again
 
 ### 7. Hardening
 
-- Guest session TTL / cleanup  
 - Clearer API errors for unknown section / missing required fields  
 - Optional: soft **archive** tool (status + exclude) if users need “retire” vs hide  
 - Env / `.env.example` kept accurate for chat, enrich, realtime models
@@ -84,6 +87,12 @@ Cold start when the user has **no** resume yet.
 - Context search does not create undo snapshots or increment resume versions
 - Chat responses expose `contextUsed` for debugging without server-side PII logging
 
+### 9. Auth + save/export gating
+
+- Anonymous user: exactly one draft session  
+- Logged-in user: many draft sessions  
+- Durable save / export requires login
+
 ---
 
 ## Suggested v1 build order
@@ -93,7 +102,9 @@ Cold start when the user has **no** resume yet.
 3. ~~PDF → native v3~~ ✅
 4. ~~Context slicing~~ ✅
 5. ~~Item order (`reorder_items`)~~ ✅  
-6. Hardening  
+6. ~~Manual basics + verification gate~~ ✅  
+7. Auth + save/export gating (anonymous one draft, logged-in many)  
+8. Hardening  
 
 Preview first is recommended so intake and edit both have something to show.
 
@@ -105,7 +116,7 @@ Preview first is recommended so intake and edit both have something to show.
 - Multi-resume views (one inventory, many resumes)  
 - Source matching (e.g. GitHub ↔ claims)  
 - Field **update** / bullet-edit tools after add  
-- Auth, multi-user, production marketing site  
+- Production marketing site  
 
 ---
 

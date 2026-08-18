@@ -2,6 +2,7 @@
   "schemaVersion": 3,
   "intake": {
     "status": "complete",
+    "basicsVerified": true,
     "basicsConfirmed": true,
     "skillsConfirmed": true,
     "confirmedSkippedSections": []

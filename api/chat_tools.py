@@ -10,7 +10,6 @@ from resume_ops import (
     reorder_items,
     reorder_sections,
     section_catalog,
-    set_basics,
     set_skills,
     validate_intake_item_fields,
 )
@@ -149,55 +148,6 @@ TOOL_DEFINITIONS = [
     },
 ]
 
-SET_BASICS_TOOL = {
-    "type": "function",
-    "name": "set_basics",
-    "description": (
-        "Save personal basics during intake only. Ask one field at a time and "
-        "explicitly confirm every blank before calling."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "basics": {
-                "type": "object",
-                "properties": {
-                    "fullName": {"type": "string"},
-                    "email": {"type": "string"},
-                    "phone": {"type": "string"},
-                    "location": {"type": "string"},
-                    "links": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "label": {"type": "string"},
-                                "url": {"type": "string"},
-                            },
-                            "required": ["label", "url"],
-                            "additionalProperties": False,
-                        },
-                    },
-                },
-                "required": ["fullName", "email", "phone", "location", "links"],
-                "additionalProperties": False,
-            },
-            "githubUsername": {
-                "type": "string",
-                "description": (
-                    "GitHub username only, when the user has a technical background."
-                ),
-            },
-            "confirmedEmptyFields": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-        },
-        "required": ["basics", "confirmedEmptyFields"],
-        "additionalProperties": False,
-    },
-}
-
 SET_SKILLS_TOOL = {
     "type": "function",
     "name": "set_skills",
@@ -219,7 +169,8 @@ COMPLETE_INTAKE_TOOL = {
     "type": "function",
     "name": "complete_intake",
     "description": (
-        "Finish intake after basics, skills, and all built-in sections were addressed."
+        "Finish intake after skills and all built-in sections were addressed. "
+        "Personal details are confirmed in the app, not through this tool."
     ),
     "parameters": {
         "type": "object",
@@ -235,7 +186,6 @@ COMPLETE_INTAKE_TOOL = {
 }
 
 INTAKE_TOOL_DEFINITIONS = [
-    SET_BASICS_TOOL,
     SET_SKILLS_TOOL,
     TOOL_DEFINITIONS[2],
     COMPLETE_INTAKE_TOOL,
@@ -263,16 +213,9 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
         }
 
     if name == "set_basics":
-        new_payload = set_basics(
-            payload,
-            arguments["basics"],
-            github_username=arguments.get("githubUsername") or "",
-            confirmed_empty_fields=arguments.get("confirmedEmptyFields") or [],
+        raise ValueError(
+            "Personal details are manual-only and cannot be changed by tools"
         )
-        return new_payload, {
-            "ok": True,
-            "intakeContext": intake_context(new_payload),
-        }
 
     if name == "set_skills":
         new_payload = set_skills(

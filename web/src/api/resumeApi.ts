@@ -97,3 +97,35 @@ export function reorderResumeItems(
 ): Promise<ResumeResponse> {
   return postResumeTool(sessionId, 'reorder_items', { section, itemIds });
 }
+
+export async function updateResumeBasics(
+  sessionId: string,
+  basics: {
+    fullName: string
+    email: string
+    phone: string
+    location: string
+    github: string
+    linkedin: string
+  }
+): Promise<ResumeResponse> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/basics`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...basics, verify: true }),
+    }
+  )
+  if (!res.ok) {
+    let message = `Update basics failed: ${res.status}`
+    try {
+      const body = await res.json()
+      if (typeof body?.detail === 'string') message = body.detail
+    } catch {
+      /* keep fallback */
+    }
+    throw new Error(message)
+  }
+  return res.json()
+}

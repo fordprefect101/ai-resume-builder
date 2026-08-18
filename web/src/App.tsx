@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   getResume,
   importResumePdf,
@@ -6,11 +6,13 @@ import {
   reorderResumeItems,
   reorderResumeSections,
   setItemIncluded,
+  updateResumeBasics,
   startIntake,
 } from './api/resumeApi'
 import { ResumeEditor } from './components/ResumeEditor'
 import { ResumePreview } from './components/ResumePreview'
 import {
+  isBasicsVerified,
   isResumePayload,
   type ResumePayload,
 } from './types/resume'
@@ -20,7 +22,7 @@ import './App.css'
 
 const EMPTY_PAYLOAD: ResumePayload = {
   schemaVersion: 3,
-  intake: { status: 'not_started' },
+  intake: { status: 'not_started', basicsVerified: false },
   inventory: {
     basics: {
       fullName: '',
@@ -58,6 +60,7 @@ function App() {
   )
   const [payload, setPayload] = useState<ResumePayload>(EMPTY_PAYLOAD)
   const [busyAction, setBusyAction] = useState('')
+  const [basicsDirty, setBasicsDirty] = useState(false)
   const [version, setVersion] = useState<number | null>(null)
   const [status, setStatus] = useState('')
   const voiceRef = useRef<RealtimeHandles | null>(null)
@@ -66,6 +69,14 @@ function App() {
   const pdfInputRef = useRef<HTMLInputElement | null>(null)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
+  const contentLocked = !isBasicsVerified(payload) || basicsDirty
+
+  useEffect(() => {
+    if (!contentLocked || !voiceRef.current) return
+    voiceRef.current.stop()
+    voiceRef.current = null
+    setVoiceStatus('Voice off')
+  }, [contentLocked])
 
   function applyPayload(nextPayload: unknown) {
     if (!isResumePayload(nextPayload)) {
@@ -75,7 +86,14 @@ function App() {
     setPayloadText(JSON.stringify(nextPayload, null, 2))
   }
   
-  async function handleStartVoice(targetSessionId = sessionIdRef.current) {
+  async function handleStartVoice(
+    targetSessionId = sessionIdRef.current,
+    options?: { skipGate?: boolean }
+  ) {
+    if (!options?.skipGate && contentLocked) {
+      setStatus('Confirm your personal details before starting voice')
+      return
+    }
     try {
       setVoiceStatus('Connecting…')
       sessionIdRef.current = targetSessionId
@@ -140,9 +158,9 @@ function App() {
       sessionIdRef.current = data.sessionId
       applyPayload(data.payload)
       setVersion(data.version)
+      setBasicsDirty(false)
       setScreen('workspace')
-      setStatus('Intake session created')
-      await handleStartVoice(data.sessionId)
+      setStatus('Confirm your personal details to start voice intake')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Could not start intake')
     }
@@ -157,8 +175,9 @@ function App() {
       sessionIdRef.current = data.sessionId
       applyPayload(data.payload)
       setVersion(data.version)
+      setBasicsDirty(false)
       setScreen('workspace')
-      setStatus('PDF imported — ready to edit')
+      setStatus('PDF imported — confirm personal details to continue')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'PDF import failed')
     } finally {
@@ -281,6 +300,36 @@ function App() {
     }
   }
 
+  async function handleConfirmBasics(basics: {
+    fullName: string
+    email: string
+    phone: string
+    location: string
+    github: string
+    linkedin: string
+  }) {
+    try {
+      setBusyAction('basics')
+      const data = await updateResumeBasics(sessionIdRef.current, basics)
+      applyPayload(data.payload)
+      setVersion(data.version)
+      setBasicsDirty(false)
+      const intakeStatus = (
+        data.payload as { intake?: { status?: string } }
+      ).intake?.status
+      setStatus('Personal details confirmed')
+      if (intakeStatus === 'in_progress') {
+        await handleStartVoice(sessionIdRef.current, { skipGate: true })
+      }
+    } catch (err) {
+      setStatus(
+        err instanceof Error ? err.message : 'Could not save personal details'
+      )
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   if (screen === 'landing') {
     return (
       <main className="intake-landing">
@@ -298,7 +347,7 @@ function App() {
               onClick={handleVoiceIntake}
             >
               <strong>Start from voice</strong>
-              <span>Answer one question at a time</span>
+              <span>Confirm your details, then answer one question at a time</span>
             </button>
             <button
               className="intake-option"
@@ -306,7 +355,7 @@ function App() {
               onClick={() => pdfInputRef.current?.click()}
             >
               <strong>I have a PDF</strong>
-              <span>Import it and continue in edit mode</span>
+              <span>Import it, confirm your details, then continue</span>
             </button>
             <input
               ref={pdfInputRef}
@@ -341,6 +390,7 @@ function App() {
             <button
               className="primary-action"
               type="button"
+              disabled={contentLocked}
               onClick={() => handleStartVoice()}
             >
               Start voice
@@ -367,6 +417,9 @@ function App() {
         <ResumeEditor
           payload={payload}
           busyAction={busyAction}
+          contentLocked={contentLocked}
+          onConfirmBasics={handleConfirmBasics}
+          onBasicsDirtyChange={setBasicsDirty}
           onMoveSection={handleMoveSection}
           onMoveItem={handleMoveItem}
           onToggleItem={handleToggleItem}

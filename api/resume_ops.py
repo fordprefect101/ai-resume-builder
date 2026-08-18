@@ -1,15 +1,27 @@
 """Generic resume list-section mutations (schemaVersion 3)."""
 
+from datetime import datetime, timezone
 import uuid
 
 from section_registry import BUILTIN_SECTION_ORDER, get_section_profile
 
 
 BASIC_FIELDS = ("fullName", "email", "phone", "location")
+BASICS_UNVERIFIED = "Confirm your personal details before continuing."
 
 
 def is_intake_in_progress(payload: dict) -> bool:
     return (payload.get("intake") or {}).get("status") == "in_progress"
+
+
+def is_basics_verified(payload: dict) -> bool:
+    intake = payload.get("intake") or {}
+    return bool(intake.get("basicsVerified") or intake.get("basicsConfirmed"))
+
+
+def require_basics_verified(payload: dict) -> None:
+    if not is_basics_verified(payload):
+        raise ValueError(BASICS_UNVERIFIED)
 
 
 def _require_intake(payload: dict) -> None:
@@ -29,56 +41,103 @@ def _confirmed_empty_fields(
         )
 
 
-def set_basics(
+def _github_url(value: str) -> str:
+    username = str(value or "").strip().lstrip("@")
+    if "github.com/" in username:
+        username = username.split("github.com/", 1)[1].split("/", 1)[0]
+    username = username.strip("/")
+    if not username:
+        return ""
+    return f"https://github.com/{username}"
+
+
+def _linkedin_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "linkedin.com/" in raw.lower():
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return raw
+        return f"https://{raw.lstrip('/')}"
+    handle = raw.lstrip("@").strip("/")
+    if handle.lower().startswith("in/"):
+        handle = handle[3:]
+    if not handle:
+        return ""
+    return f"https://www.linkedin.com/in/{handle}"
+
+
+def _upsert_link(links: list[dict], label: str, url: str) -> list[dict]:
+    kept = [
+        link
+        for link in links
+        if str(link.get("label") or "").strip().lower() != label.lower()
+    ]
+    if url:
+        kept.append({"label": label, "url": url})
+    return kept
+
+
+def update_basics(
     payload: dict,
     basics: dict,
     *,
-    github_username: str = "",
-    confirmed_empty_fields: list[str] | None = None,
+    github: str | None = None,
+    linkedin: str | None = None,
+    verify: bool = False,
 ) -> dict:
-    """Set basics during intake only, requiring confirmation for every blank field."""
-    _require_intake(payload)
+    """
+    Manual-only basics update. AI tools must not call this.
+    verify=True requires a name and unlocks resume tools.
+    Any save with verify=False clears the verification gate.
+    """
     if not isinstance(basics, dict):
         raise ValueError("basics must be an object")
 
     cleaned = {
         field: str(basics.get(field) or "").strip() for field in BASIC_FIELDS
     }
-    links = basics.get("links") or []
-    if not isinstance(links, list):
-        raise ValueError("basics.links must be an array")
+    email = cleaned["email"]
+    if email and "@" not in email:
+        raise ValueError("email must contain @")
 
-    normalized_links: list[dict] = []
-    for link in links:
-        if not isinstance(link, dict):
-            continue
-        label = str(link.get("label") or "").strip()
-        url = str(link.get("url") or "").strip()
-        if label and url:
-            normalized_links.append({"label": label, "url": url})
+    existing = ((payload.get("inventory") or {}).get("basics") or {}).get("links")
+    links: list[dict] = []
+    if isinstance(existing, list):
+        for link in existing:
+            if not isinstance(link, dict):
+                continue
+            label = str(link.get("label") or "").strip()
+            url = str(link.get("url") or "").strip()
+            if label and url:
+                links.append({"label": label, "url": url})
+    incoming = basics.get("links")
+    if isinstance(incoming, list):
+        links = []
+        for link in incoming:
+            if not isinstance(link, dict):
+                continue
+            label = str(link.get("label") or "").strip()
+            url = str(link.get("url") or "").strip()
+            if label and url:
+                links.append({"label": label, "url": url})
 
-    username = str(github_username or "").strip().lstrip("@")
-    if "github.com/" in username:
-        username = username.split("github.com/", 1)[1].split("/", 1)[0]
-    if username:
-        normalized_links = [
-            link
-            for link in normalized_links
-            if str(link.get("label") or "").lower() != "github"
-        ]
-        normalized_links.append(
-            {"label": "GitHub", "url": f"https://github.com/{username}"}
-        )
+    if github is not None:
+        links = _upsert_link(links, "GitHub", _github_url(github))
+    if linkedin is not None:
+        links = _upsert_link(links, "LinkedIn", _linkedin_url(linkedin))
 
-    empty = [field for field, value in cleaned.items() if not value]
-    if not normalized_links:
-        empty.append("links")
-    _confirmed_empty_fields(empty, confirmed_empty_fields)
+    if verify and not cleaned["fullName"]:
+        raise ValueError("fullName is required to verify personal details")
 
     inventory = dict(payload.get("inventory") or {})
-    inventory["basics"] = {**cleaned, "links": normalized_links}
+    inventory["basics"] = {**cleaned, "links": links}
     intake = dict(payload.get("intake") or {})
-    intake["basicsConfirmed"] = True
+    intake["basicsVerified"] = bool(verify)
+    intake["basicsConfirmed"] = bool(verify)
+    intake["basicsVerifiedAt"] = (
+        datetime.now(timezone.utc).isoformat() if verify else None
+    )
     return {**payload, "inventory": inventory, "intake": intake}
 
 
@@ -89,6 +148,7 @@ def set_skills(
     confirmed_empty: bool = False,
 ) -> dict:
     """Set the flat skills list during intake only."""
+    require_basics_verified(payload)
     _require_intake(payload)
     if not isinstance(skills, list):
         raise ValueError("skills must be an array")
@@ -139,10 +199,9 @@ def complete_intake(
     payload: dict, confirmed_skipped_sections: list[str] | None = None
 ) -> dict:
     """Finish intake after basics, skills, and every built-in section are addressed."""
+    require_basics_verified(payload)
     _require_intake(payload)
     intake = dict(payload.get("intake") or {})
-    if not intake.get("basicsConfirmed"):
-        raise ValueError("basics must be confirmed before completing intake")
     if not intake.get("skillsConfirmed"):
         raise ValueError("skills must be confirmed before completing intake")
 
@@ -172,6 +231,7 @@ def intake_context(payload: dict) -> dict:
     sections = inventory.get("sections") or {}
     return {
         "intake": payload.get("intake") or {},
+        "basicsVerified": is_basics_verified(payload),
         "basics": inventory.get("basics") or {},
         "skills": inventory.get("skills") or [],
         "sections": {
@@ -226,6 +286,7 @@ def _find_item(items: list, item_id: str) -> dict | None:
 
 
 def exclude_from_resume(payload: dict, section: str, item_id: str) -> dict:
+    require_basics_verified(payload)
     profile = get_section_profile(section)
     if not profile.get("allowExclude", True):
         raise ValueError(f"exclude not allowed for section: {section}")
@@ -243,6 +304,7 @@ def exclude_from_resume(payload: dict, section: str, item_id: str) -> dict:
 
 
 def include_on_resume(payload: dict, section: str, item_id: str) -> dict:
+    require_basics_verified(payload)
     _inventory, _sections_map, bag = _ensure_section(payload, section)
     if _find_item(bag["items"], item_id) is None:
         raise KeyError(f"item not found in {section}: {item_id}")
@@ -268,6 +330,7 @@ def add_item(
     Append item to inventory.sections[section].items and include on resume.
     Does not run LLM enrichment — caller applies that via apply_item_enrichment.
     """
+    require_basics_verified(payload)
     profile = get_section_profile(section)
     if not profile.get("allowAdd", True):
         raise ValueError(f"add not allowed for section: {section}")
@@ -372,6 +435,7 @@ def apply_item_enrichment(
 
 def reorder_sections(payload: dict, section_order: list[str]) -> dict:
     """Set resume.sectionOrder. Rejects unknown keys; appends omitted sections."""
+    require_basics_verified(payload)
     sections = _sections(payload)
 
     if not section_order:
@@ -404,6 +468,7 @@ def reorder_items(payload: dict, section: str, item_ids: list[str]) -> dict:
     Reorder inventory.sections[section].items.
     itemIds must be a full permutation of existing item ids.
     """
+    require_basics_verified(payload)
     inventory, sections, bag = _ensure_section(payload, section)
     items = list(bag.get("items") or [])
     by_id = {item.get("id"): item for item in items if item.get("id")}

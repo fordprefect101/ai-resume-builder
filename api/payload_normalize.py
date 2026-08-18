@@ -14,15 +14,30 @@ def normalize_payload(payload: dict) -> dict:
     if payload.get("schemaVersion") == 3 and isinstance(
         (payload.get("inventory") or {}).get("sections"), dict
     ):
-        return payload
+        return _ensure_intake_flags(payload)
 
-    return _v2_to_v3(payload)
+    return _ensure_intake_flags(_v2_to_v3(payload))
+
+
+def _ensure_intake_flags(payload: dict) -> dict:
+    intake = dict(payload.get("intake") or {})
+    if "basicsVerified" not in intake:
+        intake["basicsVerified"] = bool(intake.get("basicsConfirmed"))
+    if "basicsConfirmed" not in intake:
+        intake["basicsConfirmed"] = bool(intake.get("basicsVerified"))
+    next_payload = dict(payload)
+    next_payload["intake"] = intake
+    return next_payload
 
 
 def _blank_v3() -> dict:
     return {
         "schemaVersion": 3,
-        "intake": {"status": "not_started"},
+        "intake": {
+            "status": "not_started",
+            "basicsVerified": False,
+            "basicsConfirmed": False,
+        },
         "inventory": {
             "basics": {
                 "fullName": "",
@@ -87,7 +102,11 @@ def _v2_to_v3(payload: dict) -> dict:
 
     return {
         "schemaVersion": 3,
-        "intake": {"status": "not_started"},
+        "intake": {
+            "status": "not_started",
+            "basicsVerified": False,
+            "basicsConfirmed": False,
+        },
         "inventory": {
             "basics": {
                 "fullName": basics.get("fullName") or "",

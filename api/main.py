@@ -23,9 +23,11 @@ from resume_ops import (
     get_item,
     include_on_resume,
     intake_context,
+    is_basics_verified,
+    require_basics_verified,
     reorder_items,
     reorder_sections,
-    set_basics,
+    update_basics,
     set_skills,
     validate_intake_item_fields,
 )
@@ -79,10 +81,14 @@ class AddItemBody(BaseModel):
     confirmedEmptyFields: list[str] = []
 
 
-class SetBasicsBody(BaseModel):
-    basics: dict
-    githubUsername: str = ""
-    confirmedEmptyFields: list[str] = []
+class UpdateBasicsBody(BaseModel):
+    fullName: str
+    email: str = ""
+    phone: str = ""
+    location: str = ""
+    github: str = ""
+    linkedin: str = ""
+    verify: bool = True
 
 
 class SetSkillsBody(BaseModel):
@@ -109,6 +115,7 @@ def start_intake():
     payload = normalize_payload({})
     payload["intake"] = {
         "status": "in_progress",
+        "basicsVerified": False,
         "basicsConfirmed": False,
         "skillsConfirmed": False,
         "confirmedSkippedSections": [],
@@ -217,8 +224,8 @@ def tool_search_context(session_id: str, body: SearchContextBody):
     }
 
 
-@app.post("/resume/{session_id}/tools/set_basics")
-def tool_set_basics(session_id: str, body: SetBasicsBody):
+@app.patch("/resume/{session_id}/basics")
+def update_resume_basics(session_id: str, body: UpdateBasicsBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -231,11 +238,17 @@ def tool_set_basics(session_id: str, body: SetBasicsBody):
 
             previous = normalize_payload(row[0])
             try:
-                new_payload = set_basics(
+                new_payload = update_basics(
                     previous,
-                    body.basics,
-                    github_username=body.githubUsername,
-                    confirmed_empty_fields=body.confirmedEmptyFields,
+                    {
+                        "fullName": body.fullName,
+                        "email": body.email,
+                        "phone": body.phone,
+                        "location": body.location,
+                    },
+                    github=body.github,
+                    linkedin=body.linkedin,
+                    verify=body.verify,
                 )
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
@@ -259,8 +272,7 @@ def tool_set_basics(session_id: str, body: SetBasicsBody):
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
-        "appliedTool": "set_basics",
-        "intakeContext": intake_context(saved[1]),
+        "basicsVerified": is_basics_verified(saved[1]),
     }
 
 
@@ -652,7 +664,10 @@ def chat(body: ChatBody):
             previous_payload = normalize_payload(row[0])
 
             try:
+                require_basics_verified(previous_payload)
                 result = run_chat(previous_payload, body.message)
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
             except Exception as err:
                 raise HTTPException(status_code=500, detail=str(err)) from err
 
@@ -739,7 +754,10 @@ def realtime_token(sessionId: str):
 
     payload = normalize_payload(row[0])
     try:
+        require_basics_verified(payload)
         data = create_realtime_client_secret(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err)) from err
 

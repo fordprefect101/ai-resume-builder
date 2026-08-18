@@ -419,6 +419,86 @@ button:disabled {
   font-size: 13px;
 }
 
+.basics-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.basics-heading h3 {
+  margin: 0;
+}
+
+.basics-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.basics-status.pending {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.basics-status.verified {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.basics-copy {
+  margin: 0 0 12px;
+}
+
+.basics-form {
+  display: grid;
+  gap: 10px;
+}
+
+.basics-form label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.basics-form input {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #172033;
+  font-size: 14px;
+}
+
+.basics-form .primary-action {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 9px 14px;
+  border-color: #4f46e5;
+  background: #4f46e5;
+  color: #fff;
+}
+
+.basics-gate-note {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+}
+
+.editor-locked {
+  opacity: 0.55;
+}
+
+.editor-locked .section-card,
+.editor-locked .editor-card {
+  pointer-events: none;
+}
+
 .skill-chips {
   display: flex;
   flex-wrap: wrap;

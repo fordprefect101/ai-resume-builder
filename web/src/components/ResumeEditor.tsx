@@ -1,8 +1,23 @@
-import type { ResumeItem, ResumePayload } from '../types/resume'
+import { BasicsEditor } from './BasicsEditor'
+import {
+  isBasicsVerified,
+  type ResumeItem,
+  type ResumePayload,
+} from '../types/resume'
 
 type Props = {
   payload: ResumePayload
   busyAction: string
+  contentLocked: boolean
+  onConfirmBasics: (basics: {
+    fullName: string
+    email: string
+    phone: string
+    location: string
+    github: string
+    linkedin: string
+  }) => void
+  onBasicsDirtyChange: (dirty: boolean) => void
   onMoveSection: (section: string, direction: -1 | 1) => void
   onMoveItem: (section: string, itemId: string, direction: -1 | 1) => void
   onToggleItem: (section: string, itemId: string, included: boolean) => void
@@ -23,13 +38,17 @@ function itemLabel(section: string, item: ResumeItem): string {
 export function ResumeEditor({
   payload,
   busyAction,
+  contentLocked,
+  onConfirmBasics,
+  onBasicsDirtyChange,
   onMoveSection,
   onMoveItem,
   onToggleItem,
   onStartVoice,
 }: Props) {
-  const { basics, skills, sections } = payload.inventory
+  const { skills, sections } = payload.inventory
   const { includedIds, sectionOrder } = payload.resume
+  const verified = isBasicsVerified(payload)
 
   return (
     <aside className="resume-editor" aria-label="Resume sections editor">
@@ -38,20 +57,31 @@ export function ResumeEditor({
           <p className="eyebrow">Resume content</p>
           <h2>Organize your resume</h2>
         </div>
-        <button type="button" className="voice-add-button" onClick={onStartVoice}>
+        <button
+          type="button"
+          className="voice-add-button"
+          disabled={contentLocked}
+          onClick={onStartVoice}
+        >
           Add with voice
         </button>
       </div>
 
-      <section className="editor-card">
-        <h3>Personal details</h3>
-        <strong>{basics.fullName || 'Name not provided'}</strong>
-        <p>
-          {[basics.email, basics.phone, basics.location]
-            .filter(Boolean)
-            .join(' · ') || 'No contact details yet'}
-        </p>
-      </section>
+      <BasicsEditor
+        payload={payload}
+        busy={busyAction === 'basics'}
+        onConfirm={onConfirmBasics}
+        onDirtyChange={onBasicsDirtyChange}
+      />
+
+      <div className={contentLocked ? 'editor-locked' : undefined}>
+        {contentLocked && (
+          <p className="basics-gate-note">
+            {verified
+              ? 'Save and confirm your personal details again to keep editing.'
+              : 'Confirm your personal details to unlock voice and resume edits.'}
+          </p>
+        )}
 
       <section className="editor-card">
         <h3>Skills</h3>
@@ -154,6 +184,7 @@ export function ResumeEditor({
             </section>
           )
         })}
+      </div>
       </div>
     </aside>
   )
