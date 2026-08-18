@@ -56,6 +56,8 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "Use tools for all resume mutations. "
             "When adding an item, interview one field at a time and do not invent facts. "
             "If reordering sections, call reorder_sections with the full sectionOrder. "
+            "If reordering items inside a section, call reorder_items with that "
+            "section and the full itemIds list. "
             "Prefer soft exclude over deletion."
         )
 

@@ -89,3 +89,11 @@ export function reorderResumeSections(
 ): Promise<ResumeResponse> {
   return postResumeTool(sessionId, 'reorder_sections', { sectionOrder });
 }
+
+export function reorderResumeItems(
+  sessionId: string,
+  section: string,
+  itemIds: string[]
+): Promise<ResumeResponse> {
+  return postResumeTool(sessionId, 'reorder_items', { section, itemIds });
+}

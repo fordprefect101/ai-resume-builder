@@ -4,6 +4,7 @@ type Props = {
   payload: ResumePayload
   busyAction: string
   onMoveSection: (section: string, direction: -1 | 1) => void
+  onMoveItem: (section: string, itemId: string, direction: -1 | 1) => void
   onToggleItem: (section: string, itemId: string, included: boolean) => void
   onStartVoice: () => void
 }
@@ -23,6 +24,7 @@ export function ResumeEditor({
   payload,
   busyAction,
   onMoveSection,
+  onMoveItem,
   onToggleItem,
   onStartVoice,
 }: Props) {
@@ -101,24 +103,50 @@ export function ResumeEditor({
                 <p className="empty-section">No items yet. Add one with voice.</p>
               ) : (
                 <div className="editor-items">
-                  {section.items.map((item) => {
+                  {section.items.map((item, itemIndex) => {
                     const isIncluded = included.has(item.id)
                     const actionKey = `${sectionKey}:${item.id}`
                     return (
-                      <label className="editor-item" key={item.id}>
-                        <input
-                          type="checkbox"
-                          checked={isIncluded}
-                          disabled={busyAction === actionKey}
-                          onChange={() =>
-                            onToggleItem(sectionKey, item.id, isIncluded)
-                          }
-                        />
-                        <span>
-                          <strong>{itemLabel(sectionKey, item)}</strong>
-                          <small>{isIncluded ? 'Shown on resume' : 'Hidden'}</small>
-                        </span>
-                      </label>
+                      <div className="editor-item" key={item.id}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={isIncluded}
+                            disabled={busyAction === actionKey}
+                            onChange={() =>
+                              onToggleItem(sectionKey, item.id, isIncluded)
+                            }
+                          />
+                          <span>
+                            <strong>{itemLabel(sectionKey, item)}</strong>
+                            <small>{isIncluded ? 'Shown on resume' : 'Hidden'}</small>
+                          </span>
+                        </label>
+                        <div
+                          className="order-buttons"
+                          aria-label={`Reorder ${itemLabel(sectionKey, item)}`}
+                        >
+                          <button
+                            type="button"
+                            aria-label="Move item up"
+                            disabled={itemIndex === 0 || Boolean(busyAction)}
+                            onClick={() => onMoveItem(sectionKey, item.id, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Move item down"
+                            disabled={
+                              itemIndex === section.items.length - 1 ||
+                              Boolean(busyAction)
+                            }
+                            onClick={() => onMoveItem(sectionKey, item.id, 1)}
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </div>
                     )
                   })}
                 </div>

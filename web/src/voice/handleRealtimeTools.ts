@@ -133,6 +133,22 @@ export async function runResumeTool(
     return res.json()
   }
 
+  if (name === 'reorder_items') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/reorder_items`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          section: args.section,
+          itemIds: args.itemIds,
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(`reorder_items failed: ${res.status}`)
+    return res.json()
+  }
+
   throw new Error(`unknown tool: ${name}`)
 }
 

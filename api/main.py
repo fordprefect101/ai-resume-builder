@@ -23,6 +23,7 @@ from resume_ops import (
     get_item,
     include_on_resume,
     intake_context,
+    reorder_items,
     reorder_sections,
     set_basics,
     set_skills,
@@ -58,6 +59,11 @@ class ChatBody(BaseModel):
 
 class ReorderSectionsBody(BaseModel):
     sectionOrder: list[str]
+
+
+class ReorderItemsBody(BaseModel):
+    section: str
+    itemIds: list[str]
 
 
 class SectionItemBody(BaseModel):
@@ -548,6 +554,54 @@ def tool_reorder_sections(session_id: str, body: ReorderSectionsBody):
         "version": saved[2],
         "appliedTool": "reorder_sections",
         "sectionOrder": new_payload["resume"]["sectionOrder"],
+    }
+
+
+@app.post("/resume/{session_id}/tools/reorder_items")
+def tool_reorder_items(session_id: str, body: ReorderItemsBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="not_found")
+
+            previous = normalize_payload(row[0])
+            try:
+                new_payload = reorder_items(previous, body.section, body.itemIds)
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            push_undo(cur, session_id, previous)
+            cur.execute(
+                """
+                UPDATE resume_snapshots
+                SET payload = %s::jsonb,
+                    version = version + 1,
+                    updated_at = now()
+                WHERE session_id = %s
+                RETURNING session_id, payload, version
+                """,
+                (json.dumps(new_payload), session_id),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "reorder_items",
+        "section": body.section,
+        "itemIds": [
+            item.get("id")
+            for item in new_payload["inventory"]["sections"][body.section]["items"]
+        ],
     }
 
 

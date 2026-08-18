@@ -21,6 +21,7 @@ Use only candidates in the supplied context slice. If it is ambiguous, ask a
 clarifying question instead of guessing. Use search_resume_context if you need
 different or broader candidates.
 To reorder sections, call reorder_sections with the full sectionOrder.
+To reorder items inside a section, call reorder_items with the full itemIds list.
 After tools run, briefly confirm what changed in plain language.
 """
 

@@ -399,6 +399,47 @@ def reorder_sections(payload: dict, section_order: list[str]) -> dict:
     return {**payload, "resume": resume}
 
 
+def reorder_items(payload: dict, section: str, item_ids: list[str]) -> dict:
+    """
+    Reorder inventory.sections[section].items.
+    itemIds must be a full permutation of existing item ids.
+    """
+    inventory, sections, bag = _ensure_section(payload, section)
+    items = list(bag.get("items") or [])
+    by_id = {item.get("id"): item for item in items if item.get("id")}
+    existing = [item.get("id") for item in items if item.get("id")]
+
+    if not item_ids:
+        raise ValueError("itemIds must be a non-empty list")
+
+    seen: list[str] = []
+    for item_id in item_ids:
+        if not isinstance(item_id, str) or not item_id:
+            raise ValueError("itemIds entries must be non-empty strings")
+        if item_id not in by_id:
+            raise KeyError(f"item not found in {section}: {item_id}")
+        if item_id not in seen:
+            seen.append(item_id)
+
+    missing = [item_id for item_id in existing if item_id not in seen]
+    if missing:
+        raise ValueError(
+            f"itemIds must include every item in {section}: missing {missing}"
+        )
+
+    bag["items"] = [by_id[item_id] for item_id in seen]
+    sections[section] = bag
+    inventory["sections"] = sections
+
+    resume = dict(payload.get("resume") or {})
+    included = _included_ids(resume)
+    included_set = set(included.get(section) or [])
+    included[section] = [item_id for item_id in seen if item_id in included_set]
+    resume["includedIds"] = included
+
+    return {**payload, "inventory": inventory, "resume": resume}
+
+
 def section_catalog(payload: dict) -> dict[str, list[dict]]:
     """
     Compact catalogs per section for the model: id, labels, onResume, status.

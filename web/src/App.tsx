@@ -3,6 +3,7 @@ import {
   getResume,
   importResumePdf,
   putResume,
+  reorderResumeItems,
   reorderResumeSections,
   setItemIncluded,
   startIntake,
@@ -247,6 +248,39 @@ function App() {
     }
   }
 
+  async function handleMoveItem(
+    section: string,
+    itemId: string,
+    direction: -1 | 1
+  ) {
+    const items = payload.inventory.sections[section]?.items ?? []
+    const current = items.map((item) => item.id)
+    const index = current.indexOf(itemId)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= current.length) return
+
+    const nextOrder = [...current]
+    const moved = nextOrder[index]
+    nextOrder[index] = nextOrder[target]
+    nextOrder[target] = moved
+
+    try {
+      setBusyAction(`item-order:${section}:${itemId}`)
+      const data = await reorderResumeItems(
+        sessionIdRef.current,
+        section,
+        nextOrder
+      )
+      applyPayload(data.payload)
+      setVersion(data.version)
+      setStatus('Item order updated')
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Could not reorder items')
+    } finally {
+      setBusyAction('')
+    }
+  }
+
   if (screen === 'landing') {
     return (
       <main className="intake-landing">
@@ -334,6 +368,7 @@ function App() {
           payload={payload}
           busyAction={busyAction}
           onMoveSection={handleMoveSection}
+          onMoveItem={handleMoveItem}
           onToggleItem={handleToggleItem}
           onStartVoice={() => handleStartVoice()}
         />

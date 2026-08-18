@@ -7,6 +7,7 @@ from resume_ops import (
     include_on_resume,
     intake_context,
     is_intake_in_progress,
+    reorder_items,
     reorder_sections,
     section_catalog,
     set_basics,
@@ -103,6 +104,26 @@ TOOL_DEFINITIONS = [
                 },
             },
             "required": ["sectionOrder"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "reorder_items",
+        "description": (
+            "Reorder items within one section. Pass the full list of item ids "
+            "in the desired order."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "section": {"type": "string"},
+                "itemIds": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["section", "itemIds"],
             "additionalProperties": False,
         },
     },
@@ -317,6 +338,18 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
         return new_payload, {
             "ok": True,
             "sectionOrder": new_payload["resume"]["sectionOrder"],
+        }
+
+    if name == "reorder_items":
+        section = arguments["section"]
+        new_payload = reorder_items(payload, section, arguments["itemIds"])
+        return new_payload, {
+            "ok": True,
+            "section": section,
+            "itemIds": [
+                item.get("id")
+                for item in new_payload["inventory"]["sections"][section]["items"]
+            ],
         }
 
     raise ValueError(f"unknown tool: {name}")

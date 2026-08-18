@@ -3,7 +3,7 @@
 What is left to ship a **conversational resume editor** (not a full product platform).  
 Custom sections, multi-resume views, GitHub matching, and field-update tools are **out of scope for v1** (see v2+ below).
 
-**Last updated:** 17 Aug 2026
+**Last updated:** 18 Aug 2026
 
 ---
 
@@ -12,7 +12,7 @@ Custom sections, multi-resume views, GitHub matching, and field-update tools are
 - Persistence (`resume_snapshots`) + short undo stack  
 - Payload **v3**: `inventory.sections` + `resume.includedIds` + `sectionOrder`  
 - `normalize_payload` for older shapes on read/write  
-- Generic tools: `add_item`, `exclude_from_resume`, `include_on_resume`, `reorder_sections`  
+- Generic tools: `add_item`, `exclude_from_resume`, `include_on_resume`, `reorder_sections`, `reorder_items`  
 - Registry-driven enrich / bullet polish (`section_registry` + `enrich_section_item`)  
 - Text chat tool loop + Realtime voice harness (**edit** mode)  
 - PDF import endpoint (output may still be older shape; normalize upgrades it)
@@ -37,7 +37,7 @@ Cold start when the user has **no** resume yet.
 
 - Side-by-side structured editor + resume document (desktop)
 - Render the current view from `sectionOrder` + `includedIds` + section items  
-- Section reorder and item show/hide controls persist through generic tools
+- Section reorder, item reorder, and item show/hide controls persist through generic tools
 - Preview refreshes after editor, voice, load, PDF, and JSON save results
 - Responsive stacked layout on smaller screens
 - JSON console retained under developer tools only
@@ -55,10 +55,12 @@ Cold start when the user has **no** resume yet.
 - Flat/legacy-like model output is still accepted and normalized into v3
 - Keep `normalize_payload` as a safety net for legacy rows
 
-### 5. Item order within a section (optional but common)
+### 5. Item order within a section — ✅ complete
 
-- Tool: `reorder_items(section, itemIds)`  
-- Persist order as list order in `inventory.sections[section].items` (or an explicit order field if preferred)
+- Tool: `reorder_items(section, itemIds)` requires a full permutation of existing ids  
+- Persist order as list order in `inventory.sections[section].items`  
+- `includedIds[section]` is rewritten to the same relative order  
+- Editor up/down controls, chat, Realtime, and `POST /resume/{session_id}/tools/reorder_items`
 
 ### 6. Basics at intake only (policy lock)
 
@@ -90,7 +92,8 @@ Cold start when the user has **no** resume yet.
 2. ~~Intake mode (voice) + dual-intake UI~~ ✅
 3. ~~PDF → native v3~~ ✅
 4. ~~Context slicing~~ ✅
-5. Hardening + optional `reorder_items`  
+5. ~~Item order (`reorder_items`)~~ ✅  
+6. Hardening  
 
 Preview first is recommended so intake and edit both have something to show.
 

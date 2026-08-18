@@ -46,7 +46,7 @@ built-in sections have been explicitly addressed.
 | Field | Type | Notes |
 |-------|------|-------|
 | `title` | string | Display label (e.g. `"Education"`) |
-| `items` | object[] | Entries with stable `id` |
+| `items` | object[] | Entries with stable `id`. Array order is document order within the section (`reorder_items`). |
 
 Built-in keys: `experience`, `projects`, `education`, `achievements`. Custom keys may be added later; same bag shape.
 
@@ -119,10 +119,10 @@ Experience/projects may also have `categories[]`, `skills[]`, `bullets[]` (enric
 |-------|------|----------|-------|
 | `title` | string | yes | e.g. "General Resume" |
 | `summary` | string | no | Per-resume blurb |
-| `includedIds` | object | yes | Map `sectionKey` → `string[]` of item ids |
-| `sectionOrder` | string[] | yes | Order of section keys on this resume |
+| `includedIds` | object | yes | Map `sectionKey` → `string[]` of item ids (kept in inventory item order after `reorder_items`) |
+| `sectionOrder` | string[] | yes | Order of section keys on this resume (`reorder_sections`) |
 
-Example: `includedIds.projects = ["proj_music"]`. Soft hide = remove that id from the list for that section.
+Example: `includedIds.projects = ["proj_music"]`. Soft hide = remove that id from the list for that section. Preview item order follows `inventory.sections[section].items`.
 
 ## Soft vs hard removal
 

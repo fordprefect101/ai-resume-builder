@@ -485,7 +485,19 @@ button:disabled {
   padding: 10px;
   border-radius: 9px;
   background: #f8fafc;
+}
+
+.editor-item label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
   cursor: pointer;
+}
+
+.editor-item .order-buttons {
+  flex-shrink: 0;
 }
 
 .editor-item input {
