@@ -73,11 +73,14 @@ Cold start when the user has **no** resume yet.
 - Optional: soft **archive** tool (status + exclude) if users need “retire” vs hide  
 - Env / `.env.example` kept accurate for chat, enrich, realtime models
 
-### 8. Context slicing (chat)
+### 8. Context slicing (chat + Realtime) — ✅ complete
 
-- Do not send the full career inventory on every turn  
-- Retriever or light filter: name match, section hint, recent items  
-- Prompt gets a slice + inclusion lists; ask clarifying questions when ambiguous
+- Text chat receives a bounded, query-aware candidate slice
+- Deterministic matching uses ids, labels, section hints, categories, skills, and bullets
+- Ambiguous close matches are flagged so the model asks instead of guessing
+- Realtime starts with section counts and uses read-only `search_resume_context`
+- Context search does not create undo snapshots or increment resume versions
+- Chat responses expose `contextUsed` for debugging without server-side PII logging
 
 ---
 
@@ -86,7 +89,7 @@ Cold start when the user has **no** resume yet.
 1. ~~Live preview (makes every tool change visible)~~ ✅
 2. ~~Intake mode (voice) + dual-intake UI~~ ✅
 3. ~~PDF → native v3~~ ✅
-4. Context slicing  
+4. ~~Context slicing~~ ✅
 5. Hardening + optional `reorder_items`  
 
 Preview first is recommended so intake and edit both have something to show.

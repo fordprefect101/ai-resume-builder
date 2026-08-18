@@ -3,7 +3,8 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from chat_tools import execute_tool, section_catalog, tools_for_payload
+from chat_tools import execute_tool, tools_for_payload
+from context_selector import select_resume_context
 from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
@@ -16,6 +17,9 @@ The application owns resume truth. You only change state by calling tools.
 Prefer soft exclude over deleting.
 Use section + itemId from the catalog when possible.
 If the user names a job, project, school, or achievement, match it to an id.
+Use only candidates in the supplied context slice. If it is ambiguous, ask a
+clarifying question instead of guessing. Use search_resume_context if you need
+different or broader candidates.
 To reorder sections, call reorder_sections with the full sectionOrder.
 After tools run, briefly confirm what changed in plain language.
 """
@@ -53,17 +57,18 @@ def run_chat(payload: dict, message: str) -> dict:
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is not set")
 
-    catalog = section_catalog(payload)
     intake_mode = is_intake_in_progress(payload)
-    context = intake_context(payload)
+    context = (
+        intake_context(payload)
+        if intake_mode
+        else select_resume_context(payload, message)
+    )
     messages = [
         {"role": "system", "content": INTAKE_PROMPT if intake_mode else SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "Current section catalog (JSON):\n"
-                f"{json.dumps(catalog)}\n\n"
-                "Current intake context (JSON):\n"
+                "Current bounded context (JSON):\n"
                 f"{json.dumps(context)}\n\n"
                 f"User request:\n{message}"
             ),
@@ -88,6 +93,7 @@ def run_chat(payload: dict, message: str) -> dict:
                 "assistantMessage": choice.content or "",
                 "toolsCalled": tools_called,
                 "payload": current,
+                "contextUsed": context,
             }
 
         for call in choice.tool_calls:
@@ -107,4 +113,5 @@ def run_chat(payload: dict, message: str) -> dict:
         "assistantMessage": "Stopped after max tool rounds.",
         "toolsCalled": tools_called,
         "payload": current,
+        "contextUsed": context,
     }

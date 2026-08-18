@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from chat import run_chat
+from context_selector import select_resume_context
 from enrichment import enrich_section_item
 from payload_normalize import normalize_payload
 from pdf_import import PdfImportError, import_pdf_bytes
@@ -85,6 +86,11 @@ class SetSkillsBody(BaseModel):
 
 class CompleteIntakeBody(BaseModel):
     confirmedSkippedSections: list[str] = []
+
+
+class SearchContextBody(BaseModel):
+    query: str
+    section: str | None = None
 
 
 @app.get("/health")
@@ -172,6 +178,36 @@ def put_resume(session_id: str, body: PutResumeBody):
         "sessionId": row[0],
         "payload": row[1],
         "version": row[2],
+    }
+
+
+@app.post("/resume/{session_id}/tools/search_context")
+def tool_search_context(session_id: str, body: SearchContextBody):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT payload, version FROM resume_snapshots WHERE session_id = %s",
+                (session_id,),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    payload = normalize_payload(row[0])
+    try:
+        context = select_resume_context(
+            payload, body.query, section=body.section
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return {
+        "sessionId": session_id,
+        "version": row[1],
+        "appliedTool": "search_resume_context",
+        "mutated": False,
+        "context": context,
     }
 
 
@@ -552,7 +588,7 @@ def chat(body: ChatBody):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
+                "SELECT payload, version FROM resume_snapshots WHERE session_id = %s",
                 (body.sessionId,),
             )
             row = cur.fetchone()
@@ -566,21 +602,27 @@ def chat(body: ChatBody):
             except Exception as err:
                 raise HTTPException(status_code=500, detail=str(err)) from err
 
-            if result["toolsCalled"]:
+            mutated = any(
+                call.get("result", {}).get("mutated", True)
+                for call in result["toolsCalled"]
+            )
+            if mutated:
                 push_undo(cur, body.sessionId, previous_payload)
 
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(result["payload"]), body.sessionId),
-            )
-            saved = cur.fetchone()
+                cur.execute(
+                    """
+                    UPDATE resume_snapshots
+                    SET payload = %s::jsonb,
+                        version = version + 1,
+                        updated_at = now()
+                    WHERE session_id = %s
+                    RETURNING session_id, payload, version
+                    """,
+                    (json.dumps(result["payload"]), body.sessionId),
+                )
+                saved = cur.fetchone()
+            else:
+                saved = (body.sessionId, previous_payload, row[1])
         conn.commit()
 
     return {
@@ -589,6 +631,7 @@ def chat(body: ChatBody):
         "version": saved[2],
         "assistantMessage": result["assistantMessage"],
         "toolsCalled": result["toolsCalled"],
+        "contextUsed": result["contextUsed"],
     }
 
 

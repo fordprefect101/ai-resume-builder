@@ -13,6 +13,22 @@ export async function runResumeTool(
 ): Promise<unknown> {
   const args = JSON.parse(argsJson || '{}') as Record<string, unknown>
 
+  if (name === 'search_resume_context') {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/search_context`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: args.query ?? '',
+          section: args.section ?? null,
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(`context search failed: ${res.status}`)
+    return res.json()
+  }
+
   if (name === 'set_basics') {
     const res = await fetch(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_basics`,

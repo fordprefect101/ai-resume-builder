@@ -14,6 +14,7 @@ from resume_ops import (
     validate_intake_item_fields,
 )
 from enrichment import enrich_section_item
+from context_selector import select_resume_context
 
 # Re-export for callers that import catalogs from chat_tools
 __all__ = [
@@ -102,6 +103,26 @@ TOOL_DEFINITIONS = [
                 },
             },
             "required": ["sectionOrder"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "search_resume_context",
+        "description": (
+            "Read-only search for exact resume item ids relevant to a phrase. "
+            "Use before mutating when the current candidate slice is missing or ambiguous."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "section": {
+                    "type": "string",
+                    "description": "Optional section key to restrict the search.",
+                },
+            },
+            "required": ["query"],
             "additionalProperties": False,
         },
     },
@@ -209,6 +230,17 @@ def tools_for_payload(payload: dict) -> list[dict]:
 
 
 def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]:
+    if name == "search_resume_context":
+        return payload, {
+            "ok": True,
+            "mutated": False,
+            "context": select_resume_context(
+                payload,
+                arguments.get("query") or "",
+                section=arguments.get("section") or None,
+            ),
+        }
+
     if name == "set_basics":
         new_payload = set_basics(
             payload,

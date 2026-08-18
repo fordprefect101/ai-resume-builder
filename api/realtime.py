@@ -6,7 +6,8 @@ import urllib.request
 from dotenv import load_dotenv
 
 from chat_tools import tools_for_payload
-from resume_ops import intake_context, is_intake_in_progress, section_catalog
+from context_selector import resume_context_summary
+from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
 
@@ -19,14 +20,14 @@ def create_realtime_client_secret(payload: dict) -> dict:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     intake_mode = is_intake_in_progress(payload)
-    catalog = section_catalog(payload)
+    summary = resume_context_summary(payload)
     context = intake_context(payload)
     if intake_mode:
         instructions = (
             "You are in INTAKE mode, building a first resume through conversation. "
             "Use the persisted INTAKE CONTEXT together with every new user answer. "
             f"INTAKE CONTEXT: {json.dumps(context)}. "
-            f"SECTION CATALOG: {json.dumps(catalog)}. "
+            f"RESUME SUMMARY: {json.dumps(summary)}. "
             "Ask exactly one question at a time. Start with basics: full name, email, "
             "phone, location, and links. Never silently leave any field blank: if the "
             "user skips or omits one, ask once whether they intentionally want it blank, "
@@ -47,8 +48,12 @@ def create_realtime_client_secret(payload: dict) -> dict:
         instructions = (
             "You are in EDIT mode for an existing resume. "
             "Start by greeting briefly and asking what the user wants to edit today. "
-            f"SECTION CATALOG: {json.dumps(catalog)}. "
-            "Use exact section keys and ids. Use tools for all resume mutations. "
+            f"RESUME SUMMARY: {json.dumps(summary)}. "
+            "The summary intentionally omits item details. When the user refers to an "
+            "existing item, call search_resume_context using their phrase before any "
+            "mutation. Use exact section keys and ids from that result. If candidates "
+            "are ambiguous, ask which one they mean instead of guessing. "
+            "Use tools for all resume mutations. "
             "When adding an item, interview one field at a time and do not invent facts. "
             "If reordering sections, call reorder_sections with the full sectionOrder. "
             "Prefer soft exclude over deletion."
