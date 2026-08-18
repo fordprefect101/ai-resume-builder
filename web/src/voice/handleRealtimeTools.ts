@@ -1,3 +1,5 @@
+import { apiErrorMessage } from '../api/resumeApi'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081'
 
 type ToolCall = {
@@ -25,7 +27,7 @@ export async function runResumeTool(
         }),
       }
     )
-    if (!res.ok) throw new Error(`context search failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `context search failed: ${res.status}`))
     return res.json()
   }
 
@@ -45,7 +47,7 @@ export async function runResumeTool(
         }),
       }
     )
-    if (!res.ok) throw new Error(`set_skills failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `set_skills failed: ${res.status}`))
     return res.json()
   }
 
@@ -60,7 +62,7 @@ export async function runResumeTool(
         }),
       }
     )
-    if (!res.ok) throw new Error(`complete_intake failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `complete_intake failed: ${res.status}`))
     return res.json()
   }
 
@@ -73,7 +75,7 @@ export async function runResumeTool(
         body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
     )
-    if (!res.ok) throw new Error(`exclude failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `exclude failed: ${res.status}`))
     return res.json()
   }
 
@@ -86,7 +88,7 @@ export async function runResumeTool(
         body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
     )
-    if (!res.ok) throw new Error(`include failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `include failed: ${res.status}`))
     return res.json()
   }
 
@@ -103,7 +105,7 @@ export async function runResumeTool(
         }),
       }
     )
-    if (!res.ok) throw new Error(`add_item failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `add_item failed: ${res.status}`))
     return res.json()
   }
 
@@ -116,7 +118,7 @@ export async function runResumeTool(
         body: JSON.stringify({ sectionOrder: args.sectionOrder }),
       }
     )
-    if (!res.ok) throw new Error(`reorder_sections failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `reorder_sections failed: ${res.status}`))
     return res.json()
   }
 
@@ -132,7 +134,7 @@ export async function runResumeTool(
         }),
       }
     )
-    if (!res.ok) throw new Error(`reorder_items failed: ${res.status}`)
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `reorder_items failed: ${res.status}`))
     return res.json()
   }
 

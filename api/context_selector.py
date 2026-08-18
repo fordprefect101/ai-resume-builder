@@ -3,7 +3,7 @@
 import re
 from typing import Any
 
-from section_registry import get_section_profile
+from section_registry import format_unknown_section, get_section_profile
 
 MAX_CANDIDATES = 6
 MAX_STRING_CHARS = 500
@@ -143,7 +143,7 @@ def select_resume_context(
     included_map = resume.get("includedIds") or {}
 
     if section and section not in sections:
-        raise ValueError(f"unknown section: {section}")
+        raise ValueError(format_unknown_section(section, sections))
 
     query_text = str(query or "").strip()
     query_tokens = _tokens(query_text)

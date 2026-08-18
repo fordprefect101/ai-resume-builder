@@ -5,8 +5,10 @@ from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from chat import run_chat
@@ -48,6 +50,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(_request: Request, exc: RequestValidationError):
+    missing: list[str] = []
+    other: list[str] = []
+    for err in exc.errors():
+        loc = ".".join(str(part) for part in err.get("loc", []) if part != "body")
+        if err.get("type") == "missing":
+            missing.append(loc or "body")
+        else:
+            other.append(f"{loc}: {err.get('msg')}" if loc else str(err.get("msg")))
+    parts: list[str] = []
+    if missing:
+        label = "field" if len(missing) == 1 else "fields"
+        parts.append(f"missing required {label}: {', '.join(missing)}")
+    parts.extend(other)
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "; ".join(parts) or "invalid request"},
+    )
 
 
 class PutResumeBody(BaseModel):

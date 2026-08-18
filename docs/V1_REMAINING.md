@@ -72,11 +72,10 @@ Cold start when the user has **no** resume yet.
 - PDF import pre-fills basics but still requires user confirmation  
 - Changing confirmed details locks editing until they are confirmed again
 
-### 7. Hardening
+### 7. Hardening — ✅ complete (errors only)
 
 - Clearer API errors for unknown section / missing required fields  
-- Optional: soft **archive** tool (status + exclude) if users need “retire” vs hide  
-- Env / `.env.example` kept accurate for chat, enrich, realtime models
+- Archive tool and env-doc sync were skipped
 
 ### 8. Context slicing (chat + Realtime) — ✅ complete
 
@@ -103,8 +102,8 @@ Cold start when the user has **no** resume yet.
 4. ~~Context slicing~~ ✅
 5. ~~Item order (`reorder_items`)~~ ✅  
 6. ~~Manual basics + verification gate~~ ✅  
-7. Auth + save/export gating (anonymous one draft, logged-in many)  
-8. Hardening  
+7. ~~Clearer API errors~~ ✅  
+8. Auth + save/export gating (anonymous one draft, logged-in many)
 
 Preview first is recommended so intake and edit both have something to show.
 

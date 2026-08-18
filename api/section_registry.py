@@ -124,3 +124,9 @@ def empty_sections_bag() -> dict:
 
 def empty_included_ids() -> dict:
     return {key: [] for key in SECTION_REGISTRY}
+
+
+def format_unknown_section(section: str, known: dict | list | tuple) -> str:
+    keys = list(known) if not isinstance(known, dict) else list(known)
+    listed = ", ".join(keys) if keys else "(none)"
+    return f"unknown section {section!r}. Use one of: {listed}"

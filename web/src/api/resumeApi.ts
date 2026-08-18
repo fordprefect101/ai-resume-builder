@@ -7,12 +7,42 @@ export type ResumeResponse = {
   mode?: 'intake' | 'edit';
 };
 
+export async function apiErrorMessage(
+  res: Response,
+  fallback: string
+): Promise<string> {
+  try {
+    const body = (await res.json()) as { detail?: unknown }
+    const detail = body?.detail
+    if (typeof detail === 'string' && detail.trim()) return detail
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map((item) => {
+          if (typeof item === 'string') return item
+          if (item && typeof item === 'object' && 'msg' in item) {
+            return String((item as { msg?: unknown }).msg ?? '')
+          }
+          return ''
+        })
+        .filter(Boolean)
+      if (messages.length) return messages.join('; ')
+    }
+  } catch {
+    /* keep fallback */
+  }
+  return fallback
+}
+
+async function parseOk(res: Response, fallback: string): Promise<ResumeResponse> {
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, fallback))
+  }
+  return res.json()
+}
+
 export async function getResume(sessionId: string): Promise<ResumeResponse> {
   const res = await fetch(`${API_BASE}/resume/${encodeURIComponent(sessionId)}`);
-  if (!res.ok) {
-    throw new Error(`GET failed: ${res.status}`);
-  }
-  return res.json();
+  return parseOk(res, `GET failed: ${res.status}`);
 }
 
 export async function putResume(
@@ -24,18 +54,12 @@ export async function putResume(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
   });
-  if (!res.ok) {
-    throw new Error(`PUT failed: ${res.status}`);
-  }
-  return res.json();
+  return parseOk(res, `PUT failed: ${res.status}`);
 }
 
 export async function startIntake(): Promise<ResumeResponse> {
   const res = await fetch(`${API_BASE}/intake/start`, { method: 'POST' });
-  if (!res.ok) {
-    throw new Error(`Start intake failed: ${res.status}`);
-  }
-  return res.json();
+  return parseOk(res, `Start intake failed: ${res.status}`);
 }
 
 export async function importResumePdf(file: File): Promise<ResumeResponse> {
@@ -45,10 +69,7 @@ export async function importResumePdf(file: File): Promise<ResumeResponse> {
     method: 'POST',
     body: form,
   });
-  if (!res.ok) {
-    throw new Error(`PDF import failed: ${res.status}`);
-  }
-  return res.json();
+  return parseOk(res, `PDF import failed: ${res.status}`);
 }
 
 async function postResumeTool(
@@ -64,10 +85,7 @@ async function postResumeTool(
       body: JSON.stringify(body),
     }
   );
-  if (!res.ok) {
-    throw new Error(`${tool} failed: ${res.status}`);
-  }
-  return res.json();
+  return parseOk(res, `${tool} failed: ${res.status}`);
 }
 
 export function setItemIncluded(
@@ -118,14 +136,7 @@ export async function updateResumeBasics(
     }
   )
   if (!res.ok) {
-    let message = `Update basics failed: ${res.status}`
-    try {
-      const body = await res.json()
-      if (typeof body?.detail === 'string') message = body.detail
-    } catch {
-      /* keep fallback */
-    }
-    throw new Error(message)
+    throw new Error(await apiErrorMessage(res, `Update basics failed: ${res.status}`))
   }
   return res.json()
 }

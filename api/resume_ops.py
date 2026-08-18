@@ -3,7 +3,11 @@
 from datetime import datetime, timezone
 import uuid
 
-from section_registry import BUILTIN_SECTION_ORDER, get_section_profile
+from section_registry import (
+    BUILTIN_SECTION_ORDER,
+    format_unknown_section,
+    get_section_profile,
+)
 
 
 BASIC_FIELDS = ("fullName", "email", "phone", "location")
@@ -259,10 +263,12 @@ def _sections(payload: dict) -> dict:
 
 def _ensure_section(payload: dict, section: str) -> tuple[dict, dict, dict]:
     """Return (inventory, sections, section_bag). Raises KeyError if section missing."""
+    if not isinstance(section, str) or not section.strip():
+        raise ValueError("section is required")
     inventory = dict(payload.get("inventory") or {})
     sections = dict(_sections(payload))
     if section not in sections:
-        raise KeyError(f"unknown section: {section}")
+        raise KeyError(format_unknown_section(section, sections))
     bag = dict(sections[section] or {})
     if "items" not in bag or not isinstance(bag.get("items"), list):
         bag["items"] = list(bag.get("items") or [])
@@ -345,14 +351,26 @@ def add_item(
     if not isinstance(fields, dict):
         raise ValueError("fields must be an object")
 
-    for key in required:
-        val = fields.get(key)
-        if val is None or (isinstance(val, str) and not val.strip()):
-            raise ValueError(f"missing required field: {key}")
+    missing = [
+        key
+        for key in required
+        if fields.get(key) is None
+        or (isinstance(fields.get(key), str) and not str(fields.get(key)).strip())
+    ]
+    if missing:
+        required_list = ", ".join(required)
+        raise ValueError(
+            f"missing required field{'s' if len(missing) != 1 else ''} "
+            f"for {section}: {', '.join(missing)}. required: {required_list}"
+        )
 
     unknown = [k for k in fields if k not in allowed]
     if unknown:
-        raise ValueError(f"unknown fields for {section}: {unknown}")
+        allowed_list = ", ".join(sorted(allowed))
+        raise ValueError(
+            f"unknown fields for {section}: {', '.join(unknown)}. "
+            f"allowed: {allowed_list}"
+        )
 
     new_id = item_id or fields.get("id") or f"{profile['idPrefix']}{uuid.uuid4().hex[:8]}"
     if _find_item(items, new_id) is not None:
@@ -446,7 +464,7 @@ def reorder_sections(payload: dict, section_order: list[str]) -> dict:
         if not isinstance(key, str) or not key:
             raise ValueError("sectionOrder entries must be non-empty strings")
         if key not in sections:
-            raise KeyError(f"unknown section: {key}")
+            raise KeyError(format_unknown_section(key, sections))
         if key not in seen:
             seen.append(key)
 
