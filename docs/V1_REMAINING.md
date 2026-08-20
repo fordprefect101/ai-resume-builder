@@ -1,7 +1,6 @@
 # V1 remaining work
 
-What is left to ship a **conversational resume editor** (not a full product platform).  
-Custom sections, multi-resume views, GitHub matching, and field-update tools are **out of scope for v1** (see v2+ below).
+Functional v1 items below are **done**. Next is UI polish (after auth), then whatever we pull from [V1_DEFERRED.md](./V1_DEFERRED.md).
 
 **Last updated:** 18 Aug 2026
 
@@ -16,7 +15,8 @@ Custom sections, multi-resume views, GitHub matching, and field-update tools are
 - Manual basics form + `intake.basicsVerified` gate (AI cannot mutate basics)  
 - Registry-driven enrich / bullet polish (`section_registry` + `enrich_section_item`)  
 - Text chat tool loop + Realtime voice harness (**edit** mode)  
-- PDF import endpoint (output may still be older shape; normalize upgrades it)
+- PDF import endpoint (output may still be older shape; normalize upgrades it)  
+- Email + password auth, email verify / password reset (links logged until SMTP), one resume per user, guest claim on Save
 
 ---
 
@@ -86,11 +86,14 @@ Cold start when the user has **no** resume yet.
 - Context search does not create undo snapshots or increment resume versions
 - Chat responses expose `contextUsed` for debugging without server-side PII logging
 
-### 9. Auth + save/export gating
+### 9. Auth + save/export gating — ✅ complete
 
-- Anonymous user: exactly one draft session  
-- Logged-in user: many draft sessions  
-- Durable save / export requires login
+- Email + password; verify email before login/save; password reset via emailed link  
+- **No SMTP, no OAuth** — verify/reset URLs are logged and returned as `devVerifyUrl` / `devResetUrl` when SMTP is unset ([deferred](./V1_DEFERRED.md))  
+- Guest and logged-in users each have **one resume**  
+- Guests may draft in the current session; without save login the work is lost  
+- Save requires login; that login **claims** the guest draft onto the account  
+- Cookie keeps returning users signed in; landing offers **Open your resume**
 
 ---
 
@@ -103,24 +106,31 @@ Cold start when the user has **no** resume yet.
 5. ~~Item order (`reorder_items`)~~ ✅  
 6. ~~Manual basics + verification gate~~ ✅  
 7. ~~Clearer API errors~~ ✅  
-8. Auth + save/export gating (anonymous one draft, logged-in many)
+8. ~~Auth + save/export gating (one resume; claim only on save/export login)~~ ✅
 
 Preview first is recommended so intake and edit both have something to show.
 
 ---
 
-## Explicitly v2+ (not v1)
+## Explicitly v2+ / skipped in v1
 
+See [V1_DEFERRED.md](./V1_DEFERRED.md) for the full list (SMTP, OAuth, multiple resumes, archive, export, custom sections, …).
+
+Highlights:
+
+- SMTP / OAuth  
+- More than one resume per user  
 - Custom sections (`create_section`)  
-- Multi-resume views (one inventory, many resumes)  
 - Source matching (e.g. GitHub ↔ claims)  
 - Field **update** / bullet-edit tools after add  
 - Production marketing site  
+- Real email delivery (SMTP / Resend / etc.)
 
 ---
 
 ## Related docs
 
+- [V1_DEFERRED.md](./V1_DEFERRED.md) — SMTP and other things we chose not to do in v1  
 - [resume-payload.md](./resume-payload.md) — v3 payload shape  
 - [AI_IMPLEMENTATION_PLAN.md](./AI_IMPLEMENTATION_PLAN.md) — original phased plan (partially superseded by generic tools)  
 - [PROGRESS.md](./PROGRESS.md) — rebuild status notes  

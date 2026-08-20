@@ -20,6 +20,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/search_context`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query: args.query ?? '',
@@ -40,6 +41,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_skills`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           skills: args.skills ?? [],
@@ -56,6 +58,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/complete_intake`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           confirmedSkippedSections: args.confirmedSkippedSections ?? [],
@@ -71,6 +74,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/exclude_from_resume`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
@@ -84,6 +88,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/include_on_resume`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ section: args.section, itemId: args.itemId }),
       }
@@ -97,6 +102,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/add_item`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           section: args.section,
@@ -114,6 +120,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/reorder_sections`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sectionOrder: args.sectionOrder }),
       }
@@ -127,6 +134,7 @@ export async function runResumeTool(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/reorder_items`,
       {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           section: args.section,

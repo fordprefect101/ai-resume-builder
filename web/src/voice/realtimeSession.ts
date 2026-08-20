@@ -11,7 +11,10 @@ export async function startRealtimeSession(
   sessionId: string,
   onEvent: (event: Record<string, unknown>) => void
 ): Promise<RealtimeHandles> {
-  const tokenRes = await fetch(`${API_BASE}/realtime/token?sessionId=${encodeURIComponent(sessionId)}`)
+  const tokenRes = await fetch(
+    `${API_BASE}/realtime/token?sessionId=${encodeURIComponent(sessionId)}`,
+    { credentials: 'include' }
+  )
   if (!tokenRes.ok) throw new Error(`token failed: ${tokenRes.status}`)
   const tokenData = await tokenRes.json()
   const ephemeralKey = tokenData.value as string

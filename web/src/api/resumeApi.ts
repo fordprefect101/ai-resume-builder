@@ -1,5 +1,9 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081';
 
+export { API_BASE }
+
+const creds: RequestInit = { credentials: 'include' }
+
 export type ResumeResponse = {
   sessionId: string;
   payload: unknown;
@@ -41,7 +45,7 @@ async function parseOk(res: Response, fallback: string): Promise<ResumeResponse>
 }
 
 export async function getResume(sessionId: string): Promise<ResumeResponse> {
-  const res = await fetch(`${API_BASE}/resume/${encodeURIComponent(sessionId)}`);
+  const res = await fetch(`${API_BASE}/resume/${encodeURIComponent(sessionId)}`, creds);
   return parseOk(res, `GET failed: ${res.status}`);
 }
 
@@ -50,6 +54,7 @@ export async function putResume(
   payload: unknown
 ): Promise<ResumeResponse> {
   const res = await fetch(`${API_BASE}/resume/${encodeURIComponent(sessionId)}`, {
+    ...creds,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
@@ -58,7 +63,10 @@ export async function putResume(
 }
 
 export async function startIntake(): Promise<ResumeResponse> {
-  const res = await fetch(`${API_BASE}/intake/start`, { method: 'POST' });
+  const res = await fetch(`${API_BASE}/intake/start`, {
+    ...creds,
+    method: 'POST',
+  });
   return parseOk(res, `Start intake failed: ${res.status}`);
 }
 
@@ -66,6 +74,7 @@ export async function importResumePdf(file: File): Promise<ResumeResponse> {
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${API_BASE}/import-resume-pdf`, {
+    ...creds,
     method: 'POST',
     body: form,
   });
@@ -80,6 +89,7 @@ async function postResumeTool(
   const res = await fetch(
     `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/${tool}`,
     {
+      ...creds,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -130,6 +140,7 @@ export async function updateResumeBasics(
   const res = await fetch(
     `${API_BASE}/resume/${encodeURIComponent(sessionId)}/basics`,
     {
+      ...creds,
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...basics, verify: true }),

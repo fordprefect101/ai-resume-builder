@@ -272,6 +272,79 @@
   color: #526079;
 }
 
+.landing-auth {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 45%);
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  padding: 24px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 24%);
+}
+
+.auth-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-heading h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.auth-copy,
+.auth-status,
+.auth-dev-link {
+  color: #526079;
+  font-size: 14px;
+}
+
+.auth-dev-link {
+  word-break: break-all;
+}
+
+.auth-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.auth-form input {
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.auth-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .workspace-heading {
   display: flex;
   align-items: center;

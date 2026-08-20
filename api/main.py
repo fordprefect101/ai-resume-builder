@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 import psycopg
@@ -11,6 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+load_dotenv()
+
+from auth import ensure_auth_schema, get_current_user, load_snapshot, user_resume_session
+from auth_routes import router as auth_router
 from chat import run_chat
 from context_selector import select_resume_context
 from enrichment import enrich_section_item
@@ -35,13 +40,19 @@ from resume_ops import (
 )
 from undo import pop_undo, push_undo
 
-load_dotenv()
-
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not set")
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_auth_schema()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -134,7 +145,8 @@ def health():
 
 
 @app.post("/intake/start")
-def start_intake():
+def start_intake(request: Request):
+    user = get_current_user(request)
     payload = normalize_payload({})
     payload["intake"] = {
         "status": "in_progress",
@@ -143,17 +155,29 @@ def start_intake():
         "skillsConfirmed": False,
         "confirmedSkippedSections": [],
     }
-    session_id = f"intake_{uuid.uuid4().hex[:12]}"
 
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
+            if user:
+                existing = user_resume_session(cur, user["id"])
+                if existing:
+                    return {
+                        "sessionId": existing[0],
+                        "payload": normalize_payload(existing[1]),
+                        "version": existing[2],
+                        "mode": "edit"
+                        if (existing[1] or {}).get("intake", {}).get("status")
+                        == "complete"
+                        else "intake",
+                    }
+            session_id = f"intake_{uuid.uuid4().hex[:12]}"
             cur.execute(
                 """
-                INSERT INTO resume_snapshots (session_id, payload)
-                VALUES (%s, %s::jsonb)
+                INSERT INTO resume_snapshots (session_id, payload, user_id)
+                VALUES (%s, %s::jsonb, %s)
                 RETURNING session_id, payload, version
                 """,
-                (session_id, json.dumps(payload)),
+                (session_id, json.dumps(payload), user["id"] if user else None),
             )
             saved = cur.fetchone()
         conn.commit()
@@ -167,21 +191,10 @@ def start_intake():
 
 
 @app.get("/resume/{session_id}")
-def get_resume(session_id: str):
+def get_resume(session_id: str, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT session_id, payload, version
-                FROM resume_snapshots
-                WHERE session_id = %s
-                """,
-                (session_id,),
-            )
-            row = cur.fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="not_found")
+            row = load_snapshot(cur, session_id, get_current_user(request))
 
     return {
         "sessionId": row[0],
@@ -191,21 +204,43 @@ def get_resume(session_id: str):
 
 
 @app.put("/resume/{session_id}")
-def put_resume(session_id: str, body: PutResumeBody):
+def put_resume(session_id: str, body: PutResumeBody, request: Request):
     payload = normalize_payload(body.payload)
+    user = get_current_user(request)
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO resume_snapshots (session_id, payload)
-                VALUES (%s, %s::jsonb)
+                SELECT session_id, user_id FROM resume_snapshots
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            )
+            existing = cur.fetchone()
+            if existing:
+                load_snapshot(cur, session_id, user)
+            elif user:
+                owned = user_resume_session(cur, user["id"])
+                if owned:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This account already has a resume",
+                    )
+            cur.execute(
+                """
+                INSERT INTO resume_snapshots (session_id, payload, user_id)
+                VALUES (%s, %s::jsonb, %s)
                 ON CONFLICT (session_id) DO UPDATE
                   SET payload = EXCLUDED.payload,
                       version = resume_snapshots.version + 1,
                       updated_at = now()
                 RETURNING session_id, payload, version
                 """,
-                (session_id, json.dumps(payload)),
+                (
+                    session_id,
+                    json.dumps(payload),
+                    existing[1] if existing else (user["id"] if user else None),
+                ),
             )
             row = cur.fetchone()
         conn.commit()
@@ -218,19 +253,12 @@ def put_resume(session_id: str, body: PutResumeBody):
 
 
 @app.post("/resume/{session_id}/tools/search_context")
-def tool_search_context(session_id: str, body: SearchContextBody):
+def tool_search_context(session_id: str, body: SearchContextBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload, version FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
+            row = load_snapshot(cur, session_id, get_current_user(request))
 
-    if not row:
-        raise HTTPException(status_code=404, detail="not_found")
-
-    payload = normalize_payload(row[0])
+    payload = normalize_payload(row[1])
     try:
         context = select_resume_context(
             payload, body.query, section=body.section
@@ -240,7 +268,7 @@ def tool_search_context(session_id: str, body: SearchContextBody):
 
     return {
         "sessionId": session_id,
-        "version": row[1],
+        "version": row[2],
         "appliedTool": "search_resume_context",
         "mutated": False,
         "context": context,
@@ -248,18 +276,11 @@ def tool_search_context(session_id: str, body: SearchContextBody):
 
 
 @app.patch("/resume/{session_id}/basics")
-def update_resume_basics(session_id: str, body: UpdateBasicsBody):
+def update_resume_basics(session_id: str, body: UpdateBasicsBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = update_basics(
                     previous,
@@ -300,18 +321,11 @@ def update_resume_basics(session_id: str, body: UpdateBasicsBody):
 
 
 @app.post("/resume/{session_id}/tools/set_skills")
-def tool_set_skills(session_id: str, body: SetSkillsBody):
+def tool_set_skills(session_id: str, body: SetSkillsBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = set_skills(
                     previous,
@@ -346,18 +360,11 @@ def tool_set_skills(session_id: str, body: SetSkillsBody):
 
 
 @app.post("/resume/{session_id}/tools/complete_intake")
-def tool_complete_intake(session_id: str, body: CompleteIntakeBody):
+def tool_complete_intake(session_id: str, body: CompleteIntakeBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = complete_intake(
                     previous, body.confirmedSkippedSections
@@ -391,18 +398,11 @@ def tool_complete_intake(session_id: str, body: CompleteIntakeBody):
 
 
 @app.post("/resume/{session_id}/tools/exclude_from_resume")
-def tool_exclude_from_resume(session_id: str, body: SectionItemBody):
+def tool_exclude_from_resume(session_id: str, body: SectionItemBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = exclude_from_resume(
                     previous, body.section, body.itemId
@@ -438,18 +438,11 @@ def tool_exclude_from_resume(session_id: str, body: SectionItemBody):
 
 
 @app.post("/resume/{session_id}/tools/include_on_resume")
-def tool_include_on_resume(session_id: str, body: SectionItemBody):
+def tool_include_on_resume(session_id: str, body: SectionItemBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = include_on_resume(
                     previous, body.section, body.itemId
@@ -485,18 +478,11 @@ def tool_include_on_resume(session_id: str, body: SectionItemBody):
 
 
 @app.post("/resume/{session_id}/tools/add_item")
-def tool_add_item(session_id: str, body: AddItemBody):
+def tool_add_item(session_id: str, body: AddItemBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 validate_intake_item_fields(
                     previous,
@@ -549,18 +535,11 @@ def tool_add_item(session_id: str, body: AddItemBody):
 
 
 @app.post("/resume/{session_id}/tools/reorder_sections")
-def tool_reorder_sections(session_id: str, body: ReorderSectionsBody):
+def tool_reorder_sections(session_id: str, body: ReorderSectionsBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = reorder_sections(previous, body.sectionOrder)
             except KeyError as err:
@@ -593,18 +572,11 @@ def tool_reorder_sections(session_id: str, body: ReorderSectionsBody):
 
 
 @app.post("/resume/{session_id}/tools/reorder_items")
-def tool_reorder_items(session_id: str, body: ReorderItemsBody):
+def tool_reorder_items(session_id: str, body: ReorderItemsBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (session_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous = normalize_payload(row[0])
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
             try:
                 new_payload = reorder_items(previous, body.section, body.itemIds)
             except KeyError as err:
@@ -641,9 +613,10 @@ def tool_reorder_items(session_id: str, body: ReorderItemsBody):
 
 
 @app.post("/resume/{session_id}/tools/undo")
-def tool_undo(session_id: str):
+def tool_undo(session_id: str, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
+            load_snapshot(cur, session_id, get_current_user(request))
             previous = pop_undo(cur, session_id)
             if previous is None:
                 raise HTTPException(status_code=404, detail="nothing_to_undo")
@@ -673,18 +646,12 @@ def tool_undo(session_id: str):
 
 
 @app.post("/chat")
-def chat(body: ChatBody):
+def chat(body: ChatBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload, version FROM resume_snapshots WHERE session_id = %s",
-                (body.sessionId,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not_found")
-
-            previous_payload = normalize_payload(row[0])
+            row = load_snapshot(cur, body.sessionId, get_current_user(request))
+            previous_payload = normalize_payload(row[1])
+            version = row[2]
 
             try:
                 require_basics_verified(previous_payload)
@@ -714,7 +681,7 @@ def chat(body: ChatBody):
                 )
                 saved = cur.fetchone()
             else:
-                saved = (body.sessionId, previous_payload, row[1])
+                saved = (body.sessionId, previous_payload, version)
         conn.commit()
 
     return {
@@ -728,7 +695,7 @@ def chat(body: ChatBody):
 
 
 @app.post("/import-resume-pdf")
-async def import_resume_pdf(file: UploadFile = File(...)):
+async def import_resume_pdf(request: Request, file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="pdf_required")
 
@@ -739,17 +706,25 @@ async def import_resume_pdf(file: UploadFile = File(...)):
     except PdfImportError as err:
         raise HTTPException(status_code=err.status_code, detail=err.detail) from err
 
+    user = get_current_user(request)
     session_id = f"import_{uuid.uuid4().hex[:12]}"
 
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
+            if user:
+                existing = user_resume_session(cur, user["id"])
+                if existing:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This account already has a resume. Open it from the start screen.",
+                    )
             cur.execute(
                 """
-                INSERT INTO resume_snapshots (session_id, payload)
-                VALUES (%s, %s::jsonb)
+                INSERT INTO resume_snapshots (session_id, payload, user_id)
+                VALUES (%s, %s::jsonb, %s)
                 RETURNING session_id, payload, version
                 """,
-                (session_id, json.dumps(payload)),
+                (session_id, json.dumps(payload), user["id"] if user else None),
             )
             saved = cur.fetchone()
         conn.commit()
@@ -763,19 +738,12 @@ async def import_resume_pdf(file: UploadFile = File(...)):
 
 
 @app.get("/realtime/token")
-def realtime_token(sessionId: str):
+def realtime_token(sessionId: str, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT payload FROM resume_snapshots WHERE session_id = %s",
-                (sessionId,),
-            )
-            row = cur.fetchone()
+            row = load_snapshot(cur, sessionId, get_current_user(request))
 
-    if not row:
-        raise HTTPException(status_code=404, detail="not_found")
-
-    payload = normalize_payload(row[0])
+    payload = normalize_payload(row[1])
     try:
         require_basics_verified(payload)
         data = create_realtime_client_secret(payload)
