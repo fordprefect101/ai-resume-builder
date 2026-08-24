@@ -4,7 +4,7 @@ import {
   isBasicsVerified,
   linkedinUrlFromPayload,
   type ResumePayload,
-} from '../types/resume'
+} from '../../types/resume'
 
 type BasicsForm = {
   fullName: string

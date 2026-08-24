@@ -91,5 +91,6 @@ These are product expansions, not unfinished v1:
 
 ## Related
 
+- [ORCHESTRATOR.md](./ORCHESTRATOR.md) — conductor vs tools/schema (how to add intelligence without bypassing writes)  
 - [V1_REMAINING.md](./V1_REMAINING.md) — what is still left to build in v1  
 - [resume-payload.md](./resume-payload.md) — payload shape  

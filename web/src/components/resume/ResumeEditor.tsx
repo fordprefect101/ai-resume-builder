@@ -3,7 +3,7 @@ import {
   isBasicsVerified,
   type ResumeItem,
   type ResumePayload,
-} from '../types/resume'
+} from '../../types/resume'
 
 type Props = {
   payload: ResumePayload
@@ -54,8 +54,8 @@ export function ResumeEditor({
     <aside className="resume-editor" aria-label="Resume sections editor">
       <div className="editor-intro">
         <div>
-          <p className="eyebrow">Resume content</p>
-          <h2>Organize your resume</h2>
+          <p className="eyebrow">Your story</p>
+          <h2>Shape what shows</h2>
         </div>
         <button
           type="button"
@@ -63,7 +63,7 @@ export function ResumeEditor({
           disabled={contentLocked}
           onClick={onStartVoice}
         >
-          Add with voice
+          Talk it through
         </button>
       </div>
 
@@ -78,8 +78,8 @@ export function ResumeEditor({
         {contentLocked && (
           <p className="basics-gate-note">
             {verified
-              ? 'Save and confirm your personal details again to keep editing.'
-              : 'Confirm your personal details to unlock voice and resume edits.'}
+              ? 'Save and confirm your details again to keep editing.'
+              : 'Confirm your personal details first — then we can talk and edit.'}
           </p>
         )}
 

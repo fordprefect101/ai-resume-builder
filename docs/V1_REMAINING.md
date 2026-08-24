@@ -1,6 +1,6 @@
 # V1 remaining work
 
-Functional v1 items below are **done**. Next is UI polish (after auth), then whatever we pull from [V1_DEFERRED.md](./V1_DEFERRED.md).
+Functional v1 items below are **done**. Warm UI polish (cream / terracotta / orb) is in. Next is whatever we pull from [V1_DEFERRED.md](./V1_DEFERRED.md) (export, SMTP, …).
 
 **Last updated:** 18 Aug 2026
 
@@ -130,6 +130,7 @@ Highlights:
 
 ## Related docs
 
+- [ORCHESTRATOR.md](./ORCHESTRATOR.md) — thicken the conductor; tools + schema stay source of truth  
 - [V1_DEFERRED.md](./V1_DEFERRED.md) — SMTP and other things we chose not to do in v1  
 - [resume-payload.md](./resume-payload.md) — v3 payload shape  
 - [AI_IMPLEMENTATION_PLAN.md](./AI_IMPLEMENTATION_PLAN.md) — original phased plan (partially superseded by generic tools)  

@@ -1,4 +1,4 @@
-import type { ResumeItem, ResumePayload } from '../types/resume'
+import type { ResumeItem, ResumePayload } from '../../types/resume'
 
 type Props = {
   payload: ResumePayload

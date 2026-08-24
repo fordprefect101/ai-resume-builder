@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   forgotPassword,
   login,
@@ -7,7 +7,7 @@ import {
   signup,
   type AuthPayload,
   type AuthUser,
-} from '../api/authApi'
+} from '../../api/authApi'
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'check-email'
 
@@ -32,6 +32,16 @@ export function AuthModal({
   const [status, setStatus] = useState('')
   const [devLink, setDevLink] = useState('')
   const [busy, setBusy] = useState(false)
+  const panelRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    panelRef.current?.querySelector<HTMLInputElement>('input')?.focus()
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   function captureDev(result: AuthPayload | (Error & AuthPayload)) {
     const url = result.devVerifyUrl || result.devResetUrl
@@ -47,7 +57,10 @@ export function AuthModal({
         const result = await signup(email, password)
         captureDev(result)
         setMode('check-email')
-        setStatus(result.message || 'Check the verification link to continue.')
+        setStatus(
+          result.message ||
+            'Open the verification link to finish. Until email is wired, use the link below.'
+        )
         return
       }
       if (mode === 'login') {
@@ -58,7 +71,10 @@ export function AuthModal({
       if (mode === 'forgot') {
         const result = await forgotPassword(email)
         captureDev(result)
-        setStatus(result.message || 'If that email exists, a reset link was created.')
+        setStatus(
+          result.message ||
+            'If that email exists, a reset link is ready below.'
+        )
         return
       }
       if (mode === 'reset' && resetToken) {
@@ -70,7 +86,7 @@ export function AuthModal({
       if (mode === 'check-email') {
         const result = await resendVerify(email)
         captureDev(result)
-        setStatus(result.message || 'A new verification link was created.')
+        setStatus(result.message || 'A new verification link is ready below.')
       }
     } catch (err) {
       const error = err as Error & AuthPayload
@@ -81,26 +97,37 @@ export function AuthModal({
     }
   }
 
+  const copy =
+    mode === 'signup'
+      ? 'Create an account so you can keep this resume and come back later.'
+      : mode === 'forgot'
+        ? 'We’ll make a reset link. Until email is wired, it shows up below.'
+        : mode === 'reset'
+          ? 'Choose a new password, then log in.'
+          : mode === 'check-email'
+            ? 'Open the verification link to finish. Email delivery isn’t wired yet.'
+            : title.startsWith('Keep')
+              ? 'Log in or sign up to save this resume to your account.'
+              : 'Log in with the email and password for this account.'
+
   return (
-    <div className="auth-overlay" role="dialog" aria-modal="true" aria-label={title}>
-      <section className="auth-card">
+    <div
+      className="auth-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section className="auth-card" ref={panelRef}>
         <header className="auth-heading">
           <h2>{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close">
             ×
           </button>
         </header>
-        <p className="auth-copy">
-          {mode === 'signup'
-            ? 'Create an account, verify your email, then this resume can be saved.'
-            : mode === 'forgot'
-              ? 'We will create a reset link. Until email is wired, it appears below and in the API log.'
-              : mode === 'reset'
-                ? 'Choose a new password, then log in.'
-                : mode === 'check-email'
-                  ? 'Open the verification link to finish. SMTP is not set up yet.'
-                  : 'Log in with the email and password for this account.'}
-        </p>
+        <p className="auth-copy">{copy}</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           {mode !== 'reset' && (
             <label>
@@ -128,41 +155,51 @@ export function AuthModal({
             </label>
           )}
           <button className="primary-action" type="submit" disabled={busy}>
-            {mode === 'signup'
-              ? 'Create account'
-              : mode === 'forgot'
-                ? 'Send reset link'
-                : mode === 'reset'
-                  ? 'Update password'
-                  : mode === 'check-email'
-                    ? 'Resend verification link'
-                    : 'Log in'}
+            {busy
+              ? 'Working…'
+              : mode === 'signup'
+                ? 'Create account'
+                : mode === 'forgot'
+                  ? 'Send reset link'
+                  : mode === 'reset'
+                    ? 'Update password'
+                    : mode === 'check-email'
+                      ? 'Resend verification link'
+                      : 'Log in'}
           </button>
         </form>
         {status && <p className="auth-status">{status}</p>}
         {devLink && (
           <p className="auth-dev-link">
-            Dev link:{' '}
-            <a href={devLink}>{devLink}</a>
+            <a href={devLink}>Open verification / reset link</a>
           </p>
         )}
-        <nav className="auth-switch">
-          {mode !== 'login' && (
+        {mode !== 'check-email' && (
+          <nav className="auth-switch">
+            {mode !== 'login' && (
+              <button type="button" onClick={() => setMode('login')}>
+                Log in
+              </button>
+            )}
+            {mode !== 'signup' && (
+              <button type="button" onClick={() => setMode('signup')}>
+                Sign up
+              </button>
+            )}
+            {mode === 'login' && (
+              <button type="button" onClick={() => setMode('forgot')}>
+                Forgot password
+              </button>
+            )}
+          </nav>
+        )}
+        {mode === 'check-email' && (
+          <nav className="auth-switch">
             <button type="button" onClick={() => setMode('login')}>
-              Log in
+              Already verified? Log in
             </button>
-          )}
-          {mode !== 'signup' && (
-            <button type="button" onClick={() => setMode('signup')}>
-              Sign up
-            </button>
-          )}
-          {mode === 'login' && (
-            <button type="button" onClick={() => setMode('forgot')}>
-              Forgot password
-            </button>
-          )}
-        </nav>
+          </nav>
+        )}
       </section>
     </div>
   )

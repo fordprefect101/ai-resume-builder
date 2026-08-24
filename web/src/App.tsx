@@ -16,9 +16,11 @@ import {
   updateResumeBasics,
   startIntake,
 } from './api/resumeApi'
-import { AuthModal } from './components/AuthModal'
-import { ResumeEditor } from './components/ResumeEditor'
-import { ResumePreview } from './components/ResumePreview'
+import { AuthModal } from './components/auth'
+import { LandingScreen } from './components/landing'
+import { WorkspaceScreen } from './components/workspace'
+import type { VoiceMood } from './components/voice'
+import { EMPTY_PAYLOAD } from './constants/emptyPayload'
 import {
   isBasicsVerified,
   isResumePayload,
@@ -26,39 +28,7 @@ import {
 } from './types/resume'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
 import { handleToolCallEvent } from './voice/handleRealtimeTools'
-import './App.css'
-
-const EMPTY_PAYLOAD: ResumePayload = {
-  schemaVersion: 3,
-  intake: { status: 'not_started', basicsVerified: false },
-  inventory: {
-    basics: {
-      fullName: '',
-      email: '',
-      phone: '',
-      location: '',
-      links: [],
-    },
-    skills: [] as string[],
-    sections: {
-      experience: { title: 'Experience', items: [] },
-      projects: { title: 'Projects', items: [] },
-      education: { title: 'Education', items: [] },
-      achievements: { title: 'Achievements', items: [] },
-    },
-  },
-  resume: {
-    title: 'General Resume',
-    summary: '',
-    includedIds: {
-      experience: [] as string[],
-      projects: [] as string[],
-      education: [] as string[],
-      achievements: [] as string[],
-    },
-    sectionOrder: ['experience', 'projects', 'education', 'achievements'],
-  },
-}
+import './styles/app.css'
 
 function App() {
   const [screen, setScreen] = useState<'landing' | 'workspace'>('landing')
@@ -72,7 +42,9 @@ function App() {
   const [version, setVersion] = useState<number | null>(null)
   const [status, setStatus] = useState('')
   const voiceRef = useRef<RealtimeHandles | null>(null)
-  const [voiceStatus, setVoiceStatus] = useState('Voice off')
+  const [voiceActive, setVoiceActive] = useState(false)
+  const [voiceMood, setVoiceMood] = useState<VoiceMood>('idle')
+  const [voiceCaption, setVoiceCaption] = useState('Ready when you are.')
   const [transcriptLog, setTranscriptLog] = useState<string[]>([])
   const [user, setUser] = useState<AuthUser | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
@@ -82,12 +54,26 @@ function App() {
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const contentLocked = !isBasicsVerified(payload) || basicsDirty
+  const doneTimer = useRef<number | null>(null)
+
+  function setVoice(mood: VoiceMood, caption?: string) {
+    setVoiceMood(mood)
+    if (caption) setVoiceCaption(caption)
+    else if (mood === 'idle') setVoiceCaption('Ready when you are.')
+    else if (mood === 'listening') setVoiceCaption("I'm listening.")
+    else if (mood === 'understanding')
+      setVoiceCaption("I'm piecing this together…")
+    else if (mood === 'clarifying')
+      setVoiceCaption('Tell me a little more about that.')
+    else if (mood === 'done') setVoiceCaption("Nice. I've got it.")
+  }
 
   useEffect(() => {
     if (!contentLocked || !voiceRef.current) return
     voiceRef.current.stop()
     voiceRef.current = null
-    setVoiceStatus('Voice off')
+    setVoiceActive(false)
+    setVoice('idle')
   }, [contentLocked])
 
   useEffect(() => {
@@ -150,20 +136,21 @@ function App() {
     setPayload(nextPayload)
     setPayloadText(JSON.stringify(nextPayload, null, 2))
   }
-  
+
   async function handleStartVoice(
     targetSessionId = sessionIdRef.current,
     options?: { skipGate?: boolean }
   ) {
     if (!options?.skipGate && contentLocked) {
       setStatus('Confirm your personal details before starting voice')
+      setVoice('clarifying', 'Confirm your details first, then we can talk.')
       return
     }
     try {
-      setVoiceStatus('Connecting…')
+      setVoice('understanding', 'Connecting…')
       sessionIdRef.current = targetSessionId
       const holder: { current: RealtimeHandles | null } = { current: null }
-  
+
       const handles = await startRealtimeSession(targetSessionId, async (event) => {
         const type = String(event.type ?? '')
         if (
@@ -177,24 +164,33 @@ function App() {
             `${type}: ${JSON.stringify(event).slice(0, 200)}`,
           ])
         }
-        console.log('realtime event', event)
-  
+
+        if (type === 'response.function_call_arguments.done') {
+          setVoice('understanding')
+        }
+
         if (holder.current?.dc) {
           await handleToolCallEvent(
             holder.current.dc,
             sessionIdRef.current,
             event,
             (result) => {
-              const payload = (result as { payload?: unknown })?.payload
-              if (payload) {
-                applyPayload(payload)
-                setStatus('Updated via voice tool')
+              const nextPayload = (result as { payload?: unknown })?.payload
+              if (nextPayload) {
+                applyPayload(nextPayload)
+                setStatus('Got it — your resume updated')
+                if (doneTimer.current) window.clearTimeout(doneTimer.current)
+                setVoice('done')
+                doneTimer.current = window.setTimeout(() => {
+                  if (voiceRef.current) setVoice('listening')
+                }, 1600)
                 const intakeStatus = (
-                  payload as { intake?: { status?: string } }
+                  nextPayload as { intake?: { status?: string } }
                 ).intake?.status
                 if (intakeStatus === 'complete') {
-                  setVoiceStatus(
-                    'Intake complete — reconnect voice to continue in edit mode'
+                  setVoice(
+                    'done',
+                    'Nice. Intake is done — stop voice, then start again to edit.'
                   )
                 }
               }
@@ -202,22 +198,28 @@ function App() {
           )
         }
       })
-  
+
       holder.current = handles
       voiceRef.current = handles
-      setVoiceStatus(
+      setVoiceActive(true)
+      setVoice(
+        'listening',
         handles.mode === 'intake'
-          ? 'Intake listening — speak now'
-          : 'Edit listening — speak now'
+          ? "I'm listening — tell me about your skills."
+          : "I'm listening — what should we change?"
       )
     } catch (err) {
-      setVoiceStatus(err instanceof Error ? err.message : 'Voice failed')
+      setVoiceActive(false)
+      setVoice(
+        'clarifying',
+        err instanceof Error ? err.message : 'Voice could not start'
+      )
     }
   }
 
   async function handleVoiceIntake() {
     try {
-      setStatus('Creating intake session…')
+      setStatus('Setting up your workspace…')
       const data = await startIntake()
       setSessionId(data.sessionId)
       sessionIdRef.current = data.sessionId
@@ -225,16 +227,17 @@ function App() {
       setVersion(data.version)
       setBasicsDirty(false)
       setScreen('workspace')
-      setStatus('Confirm your personal details to start voice intake')
+      setStatus('Confirm your personal details to start')
+      setVoice('clarifying', 'Confirm your details first, then we can talk.')
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Could not start intake')
+      setStatus(err instanceof Error ? err.message : 'Could not start')
     }
   }
 
   async function handlePdfSelected(file: File | undefined) {
     if (!file) return
     try {
-      setStatus('Importing PDF…')
+      setStatus('Importing your PDF…')
       const data = await importResumePdf(file)
       setSessionId(data.sessionId)
       sessionIdRef.current = data.sessionId
@@ -242,7 +245,8 @@ function App() {
       setVersion(data.version)
       setBasicsDirty(false)
       setScreen('workspace')
-      setStatus('PDF imported — confirm personal details to continue')
+      setStatus('Imported — confirm personal details to continue')
+      setVoice('clarifying', 'Confirm your details, then we can keep going.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'PDF import failed')
     } finally {
@@ -253,9 +257,10 @@ function App() {
   function handleStopVoice() {
     voiceRef.current?.stop()
     voiceRef.current = null
-    setVoiceStatus('Voice off')
+    setVoiceActive(false)
+    setVoice('idle')
   }
-  
+
   async function handleLoad() {
     try {
       setStatus('Loading…')
@@ -267,12 +272,12 @@ function App() {
       setStatus(err instanceof Error ? err.message : 'Load failed')
     }
   }
-  
+
   async function handleSave() {
     try {
       setStatus('Saving…')
-      const payload = JSON.parse(payloadText)
-      const data = await putResume(sessionId, payload)
+      const next = JSON.parse(payloadText)
+      const data = await putResume(sessionId, next)
       applyPayload(data.payload)
       setVersion(data.version)
       setStatus(`Saved version ${data.version}`)
@@ -297,7 +302,7 @@ function App() {
       )
       applyPayload(data.payload)
       setVersion(data.version)
-      setStatus(currentlyIncluded ? 'Item hidden from resume' : 'Item shown on resume')
+      setStatus(currentlyIncluded ? 'Hidden from resume' : 'Shown on resume')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Could not update item')
     } finally {
@@ -383,6 +388,7 @@ function App() {
         data.payload as { intake?: { status?: string } }
       ).intake?.status
       setStatus('Personal details confirmed')
+      setVoice('done', 'Details confirmed. Ready when you are.')
       if (intakeStatus === 'in_progress') {
         await handleStartVoice(sessionIdRef.current, { skipGate: true })
       }
@@ -430,7 +436,7 @@ function App() {
         applyPayload(data.payload)
         setVersion(data.version)
         setScreen('workspace')
-        setStatus(`Signed in as ${nextUser.email}`)
+        setStatus(`Welcome back, ${nextUser.email}`)
       } catch (err) {
         setStatus(err instanceof Error ? err.message : 'Could not open your resume')
       }
@@ -445,7 +451,7 @@ function App() {
     }
     if (!user) {
       localStorage.setItem('pendingClaimSessionId', currentId)
-      openAuth('Save this resume')
+      openAuth('Keep this resume')
       return
     }
     try {
@@ -457,7 +463,7 @@ function App() {
         setVersion(claimed.version ?? null)
       }
       setUser({ ...user, resumeSessionId: claimed.sessionId ?? currentId })
-      setStatus('Resume saved to your account')
+      setStatus('Saved to your account')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Could not save to this account')
     }
@@ -492,208 +498,70 @@ function App() {
     }
   }
 
+  const authModal = authOpen ? (
+    <AuthModal
+      title={authTitle}
+      initialMode={authTitle.startsWith('Keep') ? 'signup' : 'login'}
+      resetToken={resetToken}
+      onClose={() => {
+        setAuthOpen(false)
+        setResetToken('')
+      }}
+      onAuthenticated={handleAuthenticated}
+    />
+  ) : null
+
   if (screen === 'landing') {
     return (
-      <main className="intake-landing">
-        <section className="intake-card">
-          <p className="eyebrow">Conversational resume builder</p>
-          <h1>How would you like to begin?</h1>
-          <p className="intro">
-            Bring an existing resume, or build one through a guided voice
-            conversation. Save to an account when you want to keep it.
-          </p>
-          {user && (
-            <p className="landing-status">
-              Signed in as {user.email}
-              {user.resumeSessionId ? ' — you have a saved resume.' : ''}
-            </p>
-          )}
-          <div className="intake-actions">
-            {user?.resumeSessionId && (
-              <button
-                className="intake-option primary"
-                type="button"
-                onClick={handleOpenSavedResume}
-              >
-                <strong>Open your resume</strong>
-                <span>Continue the resume saved to this account</span>
-              </button>
-            )}
-            <button
-              className="intake-option primary"
-              type="button"
-              onClick={handleVoiceIntake}
-            >
-              <strong>Start from voice</strong>
-              <span>Confirm your details, then answer one question at a time</span>
-            </button>
-            <button
-              className="intake-option"
-              type="button"
-              onClick={() => pdfInputRef.current?.click()}
-            >
-              <strong>I have a PDF</strong>
-              <span>Import it, confirm your details, then continue</span>
-            </button>
-            <input
-              ref={pdfInputRef}
-              hidden
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={(event) =>
-                handlePdfSelected(event.target.files?.[0])
-              }
-            />
-          </div>
-          <div className="landing-auth">
-            {user ? (
-              <button type="button" onClick={handleLogout}>
-                Log out
-              </button>
-            ) : (
-              <button type="button" onClick={() => openAuth('Log in')}>
-                Log in
-              </button>
-            )}
-          </div>
-          {status && <p className="landing-status">{status}</p>}
-        </section>
-        {authOpen && (
-          <AuthModal
-            title={authTitle}
-            initialMode={authTitle.startsWith('Save') ? 'signup' : 'login'}
-            resetToken={resetToken}
-            onClose={() => {
-              setAuthOpen(false)
-              setResetToken('')
-            }}
-            onAuthenticated={handleAuthenticated}
-          />
-        )}
-      </main>
+      <LandingScreen
+        user={user}
+        status={status}
+        pdfInputRef={pdfInputRef}
+        onLogout={handleLogout}
+        onOpenAuth={() => openAuth('Welcome back')}
+        onOpenSaved={handleOpenSavedResume}
+        onVoiceStart={handleVoiceIntake}
+        onPickPdf={() => pdfInputRef.current?.click()}
+        onPdfSelected={handlePdfSelected}
+        authModal={authModal}
+      />
     )
   }
 
   return (
-    <main className="builder-workspace">
-      <header className="builder-toolbar">
-        <div>
-          <p className="eyebrow">Resume builder</p>
-          <h1>{payload.resume.title || 'General Resume'}</h1>
-        </div>
-        <div className="toolbar-actions">
-          <span className="voice-status">{voiceStatus}</span>
-          {voiceRef.current ? (
-            <button type="button" onClick={handleStopVoice}>
-              Stop voice
-            </button>
-          ) : (
-            <button
-              className="primary-action"
-              type="button"
-              disabled={contentLocked}
-              onClick={() => handleStartVoice()}
-            >
-              Start voice
-            </button>
-          )}
-          <button type="button" onClick={handleSaveToAccount}>
-            Save
-          </button>
-          {user ? (
-            <button type="button" onClick={handleLogout}>
-              Log out
-            </button>
-          ) : (
-            <button type="button" onClick={() => openAuth('Log in')}>
-              Log in
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              handleStopVoice()
-              setScreen('landing')
-            }}
-          >
-            Exit
-          </button>
-        </div>
-      </header>
-
-      <div className="builder-status" role="status">
-        <span>{status || 'All changes are synchronized'}</span>
-        {version !== null && <span>Version {version}</span>}
-      </div>
-
-      <div className="builder-split">
-        <ResumeEditor
-          payload={payload}
-          busyAction={busyAction}
-          contentLocked={contentLocked}
-          onConfirmBasics={handleConfirmBasics}
-          onBasicsDirtyChange={setBasicsDirty}
-          onMoveSection={handleMoveSection}
-          onMoveItem={handleMoveItem}
-          onToggleItem={handleToggleItem}
-          onStartVoice={() => handleStartVoice()}
-        />
-        <section className="preview-pane">
-          <div className="preview-pane-heading">
-            <div>
-              <p className="eyebrow">Live preview</p>
-              <h2>Resume document</h2>
-            </div>
-            <span>Updates automatically</span>
-          </div>
-          <div className="paper-stage">
-            <ResumePreview payload={payload} />
-          </div>
-        </section>
-      </div>
-
-      <details className="developer-tools">
-        <summary>Developer tools</summary>
-        <div className="developer-toolbar">
-          <label>
-            Session ID
-            <input
-              value={sessionId}
-              onChange={(event) => setSessionId(event.target.value)}
-            />
-          </label>
-          <button type="button" onClick={handleLoad}>
-            Load
-          </button>
-          <button type="button" onClick={handleSave}>
-            Save JSON
-          </button>
-        </div>
-        <details>
-          <summary>Realtime event log</summary>
-          <pre>
-            {transcriptLog.join('\n') || 'Transcript events will appear here'}
-          </pre>
-        </details>
-        <textarea
-          value={payloadText}
-          onChange={(event) => setPayloadText(event.target.value)}
-          rows={20}
-        />
-      </details>
-      {authOpen && (
-        <AuthModal
-          title={authTitle}
-          initialMode={authTitle.startsWith('Save') ? 'signup' : 'login'}
-          resetToken={resetToken}
-          onClose={() => {
-            setAuthOpen(false)
-            setResetToken('')
-          }}
-          onAuthenticated={handleAuthenticated}
-        />
-      )}
-    </main>
+    <WorkspaceScreen
+      user={user}
+      payload={payload}
+      status={status}
+      sessionId={sessionId}
+      payloadText={payloadText}
+      version={version}
+      busyAction={busyAction}
+      contentLocked={contentLocked}
+      voiceActive={voiceActive}
+      voiceMood={voiceMood}
+      voiceCaption={voiceCaption}
+      transcriptLog={transcriptLog}
+      onConfirmBasics={handleConfirmBasics}
+      onBasicsDirtyChange={setBasicsDirty}
+      onMoveSection={handleMoveSection}
+      onMoveItem={handleMoveItem}
+      onToggleItem={handleToggleItem}
+      onStartVoice={() => handleStartVoice()}
+      onStopVoice={handleStopVoice}
+      onSaveToAccount={handleSaveToAccount}
+      onLogout={handleLogout}
+      onOpenAuth={() => openAuth('Welcome back')}
+      onGoHome={() => {
+        handleStopVoice()
+        setScreen('landing')
+      }}
+      onSessionIdChange={setSessionId}
+      onPayloadTextChange={setPayloadText}
+      onLoad={handleLoad}
+      onSaveJson={handleSave}
+      authModal={authModal}
+    />
   )
 }
 
