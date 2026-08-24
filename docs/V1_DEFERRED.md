@@ -3,7 +3,7 @@
 Things we **chose not to do in v1**, plus follow-ups that auth will need later.  
 This is the memory file so they are not rediscovered as missing features.
 
-**Last updated:** 18 Aug 2026
+**Last updated:** 24 Aug 2026
 
 ---
 
@@ -49,6 +49,28 @@ Until then, accounts can still be created and verified by opening the logged URL
 
 ---
 
+## Do not forget: PDF import (UI removed for now)
+
+**Status:** Landing UI entry removed (24 Aug 2026). Backend `POST /import-resume-pdf` still exists in `api/` but is not exposed in the product UI.
+
+**Why it was pulled from the UI**
+
+- Import maps PDF text → structured JSON → the app’s fixed preview layout
+- It does **not** keep the uploaded PDF’s visual format
+- Incomplete link/basics shapes caused frontend crashes; content fidelity is uneven
+
+**When we pick this up again, work on**
+
+1. **Content fidelity** — more reliable extraction into v3 (`inventory` + `includedIds`), including links/basics edge cases  
+2. **UX honesty** — make clear that the app uses its own layout, not the PDF’s look  
+3. **Optional: original PDF viewer** — side-by-side reference while editing structured data  
+4. **Re-enable landing CTA** — only after 1–2 feel solid; wire `web` → `/import-resume-pdf` again  
+5. **Later:** templates / export (separate from “clone my PDF layout”)
+
+Until then, cold start is **voice only**.
+
+---
+
 ## Chosen not to do in v1 (auth / product)
 
 | Item | Why it waited |
@@ -61,6 +83,7 @@ Until then, accounts can still be created and verified by opening the logged URL
 | **Claim guest draft on any login** | Claim **only** when they log in from save/export |
 | **Force login before building** | Guests may start; login on save/export (cookie if already logged in) |
 | **PDF / file export** | Gate it when it exists; do not build export in the auth slice |
+| **PDF import in UI** | Removed from landing until extraction/UX is solid — see above |
 
 ---
 

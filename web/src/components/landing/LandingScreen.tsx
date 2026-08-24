@@ -1,30 +1,24 @@
-import type { ReactNode, RefObject } from 'react'
+import type { ReactNode } from 'react'
 import type { AuthUser } from '../../api/authApi'
 import { VoiceOrb } from '../voice'
 
 type Props = {
   user: AuthUser | null
   status: string
-  pdfInputRef: RefObject<HTMLInputElement | null>
   onLogout: () => void
   onOpenAuth: () => void
   onOpenSaved: () => void
   onVoiceStart: () => void
-  onPickPdf: () => void
-  onPdfSelected: (file: File | undefined) => void
   authModal: ReactNode
 }
 
 export function LandingScreen({
   user,
   status,
-  pdfInputRef,
   onLogout,
   onOpenAuth,
   onOpenSaved,
   onVoiceStart,
-  onPickPdf,
-  onPdfSelected,
   authModal,
 }: Props) {
   const hasSaved = Boolean(user?.resumeSessionId)
@@ -74,52 +68,25 @@ export function LandingScreen({
                   <strong>Open your resume</strong>
                   <span>Continue the one saved to this account</span>
                 </button>
-                <div className="intake-secondary">
-                  <button
-                    className="intake-option"
-                    type="button"
-                    onClick={onVoiceStart}
-                  >
-                    <strong>Start with your voice</strong>
-                    <span>Opens your saved resume to keep building</span>
-                  </button>
-                  <button
-                    className="intake-option"
-                    type="button"
-                    onClick={onPickPdf}
-                  >
-                    <strong>Import a PDF</strong>
-                    <span>Only if this account has no resume yet</span>
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
                 <button
-                  className="intake-option primary"
+                  className="intake-option"
                   type="button"
                   onClick={onVoiceStart}
                 >
                   <strong>Start with your voice</strong>
-                  <span>Answer one question at a time</span>
-                </button>
-                <button
-                  className="intake-option"
-                  type="button"
-                  onClick={onPickPdf}
-                >
-                  <strong>Import a PDF</strong>
-                  <span>Bring an existing resume, then continue</span>
+                  <span>Opens your saved resume to keep building</span>
                 </button>
               </>
+            ) : (
+              <button
+                className="intake-option primary"
+                type="button"
+                onClick={onVoiceStart}
+              >
+                <strong>Start with your voice</strong>
+                <span>Answer one question at a time</span>
+              </button>
             )}
-            <input
-              ref={pdfInputRef}
-              hidden
-              type="file"
-              accept="application/pdf,.pdf"
-              onChange={(event) => onPdfSelected(event.target.files?.[0])}
-            />
           </div>
 
           <p className="landing-hint">

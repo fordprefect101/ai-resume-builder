@@ -8,7 +8,6 @@ import {
 } from './api/authApi'
 import {
   getResume,
-  importResumePdf,
   putResume,
   reorderResumeItems,
   reorderResumeSections,
@@ -50,7 +49,6 @@ function App() {
   const [authOpen, setAuthOpen] = useState(false)
   const [authTitle, setAuthTitle] = useState('Log in')
   const [resetToken, setResetToken] = useState('')
-  const pdfInputRef = useRef<HTMLInputElement | null>(null)
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const contentLocked = !isBasicsVerified(payload) || basicsDirty
@@ -231,26 +229,6 @@ function App() {
       setVoice('clarifying', 'Confirm your details first, then we can talk.')
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Could not start')
-    }
-  }
-
-  async function handlePdfSelected(file: File | undefined) {
-    if (!file) return
-    try {
-      setStatus('Importing your PDF…')
-      const data = await importResumePdf(file)
-      setSessionId(data.sessionId)
-      sessionIdRef.current = data.sessionId
-      applyPayload(data.payload)
-      setVersion(data.version)
-      setBasicsDirty(false)
-      setScreen('workspace')
-      setStatus('Imported — confirm personal details to continue')
-      setVoice('clarifying', 'Confirm your details, then we can keep going.')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'PDF import failed')
-    } finally {
-      if (pdfInputRef.current) pdfInputRef.current.value = ''
     }
   }
 
@@ -516,13 +494,10 @@ function App() {
       <LandingScreen
         user={user}
         status={status}
-        pdfInputRef={pdfInputRef}
         onLogout={handleLogout}
         onOpenAuth={() => openAuth('Welcome back')}
         onOpenSaved={handleOpenSavedResume}
         onVoiceStart={handleVoiceIntake}
-        onPickPdf={() => pdfInputRef.current?.click()}
-        onPdfSelected={handlePdfSelected}
         authModal={authModal}
       />
     )

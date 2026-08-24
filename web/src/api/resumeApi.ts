@@ -70,17 +70,6 @@ export async function startIntake(): Promise<ResumeResponse> {
   return parseOk(res, `Start intake failed: ${res.status}`);
 }
 
-export async function importResumePdf(file: File): Promise<ResumeResponse> {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch(`${API_BASE}/import-resume-pdf`, {
-    ...creds,
-    method: 'POST',
-    body: form,
-  });
-  return parseOk(res, `PDF import failed: ${res.status}`);
-}
-
 async function postResumeTool(
   sessionId: string,
   tool: string,
