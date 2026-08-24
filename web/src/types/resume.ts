@@ -55,11 +55,11 @@ export function isBasicsVerified(payload: ResumePayload): boolean {
 }
 
 function linkUrl(
-  links: Array<{ label: string; url: string }>,
+  links: Array<{ label?: string; url?: string }> | undefined,
   labels: string[]
 ): string {
-  const found = links.find((link) =>
-    labels.includes(link.label.trim().toLowerCase())
+  const found = (links ?? []).find((link) =>
+    labels.includes((link.label ?? '').trim().toLowerCase())
   )
   return found?.url ?? ''
 }

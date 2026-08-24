@@ -130,11 +130,11 @@ export function ResumePreview({ payload }: Props) {
       <header className="resume-header">
         <h1>{basics.fullName || 'Your Name'}</h1>
         {contact.length > 0 && <p>{contact.join(' · ')}</p>}
-        {basics.links.length > 0 && (
+        {(basics.links ?? []).length > 0 && (
           <nav aria-label="Profile links">
-            {basics.links.map((link) => (
-              <a key={`${link.label}-${link.url}`} href={link.url}>
-                {link.label}
+            {(basics.links ?? []).map((link, index) => (
+              <a key={`${link.label ?? 'link'}-${link.url ?? index}`} href={link.url}>
+                {link.label || link.url}
               </a>
             ))}
           </nav>
