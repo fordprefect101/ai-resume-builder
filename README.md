@@ -1,33 +1,57 @@
 # AI Resume Builder
 
-**Rebuild from scratch.** Planning docs + a Vite frontend (`web/`) and a Python API home (`api/`).
+An **evaluation-driven AI career intelligence system** that converts natural language into validated structured career updates, retrieves relevant evidence, and generates job-specific resume content with traceable provenance.
 
-**Where we are / what’s next:** [docs/PROGRESS.md](./docs/PROGRESS.md)
+**North star:** [docs/V2.md](./docs/V2.md)
 
 ## Start here
 
 | Doc | Purpose |
 |-----|---------|
-| [docs/PROGRESS.md](./docs/PROGRESS.md) | What we’ve done, decisions, next steps |
-| [docs/AI_IMPLEMENTATION_PLAN.md](./docs/AI_IMPLEMENTATION_PLAN.md) | Phased AI-first plan (inventory, tools, chat, Realtime) |
-| [DESIGN.md](./DESIGN.md) | Architecture north-star, voice/state, product intent |
-| [docs/resume-payload.md](./docs/resume-payload.md) | Resume JSON payload shape (v1 → v2 in Phase 0) |
-| [docs/IMPLEMENTATION_PHASES.md](./docs/IMPLEMENTATION_PHASES.md) | Phased scope — reference; partly outdated vs rebuild |
-| [Resume_Builder_Product_and_Technical_Architecture.docx](./Resume_Builder_Product_and_Technical_Architecture.docx) | Product + technical architecture |
+| [docs/V2.md](./docs/V2.md) | Project direction — structured ops, versioning, provenance, eval |
+| [docs/ORCHESTRATOR.md](./docs/ORCHESTRATOR.md) | Mutation pipeline — tools-only writes, policy |
+| [docs/resume-payload.md](./docs/resume-payload.md) | Resume JSON payload shape (v4) |
+| [evals/README.md](./evals/README.md) | Evaluation harness |
 
 ## Layout
 
 ```text
-api/     FastAPI backend (in progress) — Postgres schema + env
-web/     Vite + React + TypeScript frontend
-docs/    Planning + payload contract
+api/     FastAPI — mutation pipeline, versioning, JD analysis
+web/     Vite + React — intelligence panel, variants, preview
+evals/   Deterministic + LLM evaluation cases
+docs/    Architecture and payload contract
 ```
 
-## Rebuild order (suggested)
+## V2 pipeline
 
-See [docs/AI_IMPLEMENTATION_PLAN.md](./docs/AI_IMPLEMENTATION_PLAN.md). Short version:
+```text
+Text (or voice→STT) → LLM proposes CareerOperations
+                   → validate (schema, entities, ambiguity)
+                   → execute (resume_ops)
+                   → version log + facts/claims
+                   → resume variant / preview
+```
 
-1. ~~FastAPI CRUD + JSON Load/Save~~ (done)
-2. Payload v2: inventory + resume view
-3. Deterministic tools → enrichment on add → text chat → Realtime (same tools)
-4. Product UI only after AI path is solid
+## Run locally
+
+```bash
+# API (requires Postgres + OPENAI_API_KEY)
+cd api && uvicorn main:app --reload --port 8081
+
+# Frontend
+cd web && npm run dev
+
+# Evals (no API key)
+python evals/run_evals.py
+```
+
+## Key API endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /resume/{id}/mutate` | NL → structured ops → validated mutation |
+| `GET /resume/{id}/versions` | Version history |
+| `POST /resume/{id}/versions/{n}/restore` | Restore snapshot |
+| `POST /resume/{id}/analyze-jd` | JD analysis + job variant |
+| `POST /resume/{id}/retrieve` | Structured evidence retrieval |
+| `GET /resume/{id}/claims/{id}/provenance` | Claim → fact trace |

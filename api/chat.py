@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from chat_tools import execute_tool, tools_for_payload
 from context_selector import select_resume_context
+from mutation_pipeline import run_mutation
 from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
@@ -61,11 +62,25 @@ def run_chat(payload: dict, message: str) -> dict:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     intake_mode = is_intake_in_progress(payload)
-    context = (
-        intake_context(payload)
-        if intake_mode
-        else select_resume_context(payload, message)
-    )
+
+    # V2: edit mode uses structured operation pipeline
+    if not intake_mode:
+        result, trace = run_mutation(payload, message)
+        return {
+            "assistantMessage": result.clarification
+            or (
+                "Applied changes:\n" + "\n".join(f"• {d}" for d in result.diff)
+                if result.diff
+                else "Done."
+            ),
+            "toolsCalled": [{"name": "mutate", "result": {"applied": result.applied}}],
+            "payload": result.payload,
+            "contextUsed": trace.get("interpret", {}).get("context"),
+            "diff": result.diff,
+            "clarification": result.clarification,
+        }
+
+    context = intake_context(payload)
     messages = [
         {"role": "system", "content": INTAKE_PROMPT if intake_mode else SYSTEM_PROMPT},
         {

@@ -1,7 +1,9 @@
 import type { ResumeItem, ResumePayload } from '../../types/resume'
+import { activeVariantView } from '../../types/resume'
 
 type Props = {
   payload: ResumePayload
+  variantId?: string | null
 }
 
 function text(value: unknown): string {
@@ -120,15 +122,20 @@ function ResumeItemView({
   )
 }
 
-export function ResumePreview({ payload }: Props) {
+export function ResumePreview({ payload, variantId = null }: Props) {
   const { basics, skills, sections } = payload.inventory
-  const { includedIds, sectionOrder, summary } = payload.resume
+  const view = activeVariantView(payload, variantId)
+  const { includedIds, sectionOrder, summary } = view
+  const title = 'title' in view ? view.title : payload.resume.title
   const contact = [basics.email, basics.phone, basics.location].filter(Boolean)
 
   return (
     <div className="resume-paper" aria-label="Live resume preview">
       <header className="resume-header">
         <h1>{basics.fullName || 'Your Name'}</h1>
+        {title && title !== 'General Resume' && (
+          <p className="resume-variant-title">{title}</p>
+        )}
         {contact.length > 0 && <p>{contact.join(' · ')}</p>}
         {(basics.links ?? []).length > 0 && (
           <nav aria-label="Profile links">

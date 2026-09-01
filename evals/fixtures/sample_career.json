@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 4,
+  "intake": {
+    "status": "complete",
+    "basicsVerified": true,
+    "skillsConfirmed": true
+  },
+  "inventory": {
+    "basics": {
+      "fullName": "Test User",
+      "email": "test@example.com",
+      "phone": "",
+      "location": "",
+      "links": []
+    },
+    "skills": ["Python", "AWS", "Docker", "PHP"],
+    "sections": {
+      "experience": {
+        "title": "Experience",
+        "items": [
+          {
+            "id": "exp_chaishots",
+            "company": "ChaiShots",
+            "title": "Software Engineering Intern",
+            "bullets": ["Built personalization pipeline"],
+            "technologies": [],
+            "skills": ["Python"],
+            "categories": [],
+            "status": "active"
+          },
+          {
+            "id": "exp_hyrefox",
+            "company": "HyreFox",
+            "title": "AI Tech Intern",
+            "bullets": ["Worked on ML pipelines"],
+            "technologies": [],
+            "skills": [],
+            "categories": [],
+            "status": "active"
+          }
+        ]
+      },
+      "projects": { "title": "Projects", "items": [] },
+      "education": { "title": "Education", "items": [] },
+      "achievements": { "title": "Achievements", "items": [] }
+    }
+  },
+  "resume": {
+    "title": "General Resume",
+    "summary": "",
+    "includedIds": {
+      "experience": ["exp_chaishots", "exp_hyrefox"],
+      "projects": [],
+      "education": [],
+      "achievements": []
+    },
+    "sectionOrder": ["experience", "projects", "education", "achievements"]
+  },
+  "facts": [
+    {
+      "id": "fact_lambda",
+      "content": "Built AWS Lambda functions.",
+      "context": { "section": "experience", "itemId": "exp_chaishots" },
+      "source": "user"
+    }
+  ],
+  "claims": [],
+  "variants": {}
+}

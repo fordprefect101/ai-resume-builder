@@ -17,11 +17,17 @@ load_dotenv()
 from auth import ensure_auth_schema, get_current_user, load_snapshot, user_resume_session
 from auth_routes import router as auth_router
 from chat import run_chat
+from claims import claim_provenance
 from context_selector import select_resume_context
-from enrichment import enrich_section_item
+from facts import sync_facts_from_item
+from jd_analyze import analyze_job_description, create_job_variant
+from mutation_pipeline import run_mutation
 from payload_normalize import normalize_payload
 from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
+from retrieval import retrieve_evidence
+from traces import get_trace, log_trace
+from versions import ensure_v2_schema, get_version_snapshot, list_versions, record_version
 from resume_ops import (
     add_item,
     apply_item_enrichment,
@@ -48,6 +54,7 @@ if not DATABASE_URL:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ensure_auth_schema()
+    ensure_v2_schema()
     yield
 
 
@@ -137,6 +144,55 @@ class CompleteIntakeBody(BaseModel):
 class SearchContextBody(BaseModel):
     query: str
     section: str | None = None
+
+
+class MutateBody(BaseModel):
+    message: str
+
+
+class AnalyzeJdBody(BaseModel):
+    jobDescription: str
+    createVariant: bool = True
+    variantName: str | None = None
+
+
+class RetrieveBody(BaseModel):
+    query: str
+    section: str | None = None
+
+
+def _save_payload(
+    cur,
+    session_id: str,
+    previous: dict,
+    new_payload: dict,
+    *,
+    operations: list | None = None,
+    summary: str = "",
+) -> tuple:
+    push_undo(cur, session_id, previous)
+    cur.execute(
+        """
+        UPDATE resume_snapshots
+        SET payload = %s::jsonb,
+            version = version + 1,
+            updated_at = now()
+        WHERE session_id = %s
+        RETURNING session_id, payload, version
+        """,
+        (json.dumps(new_payload), session_id),
+    )
+    saved = cur.fetchone()
+    if operations is not None and saved:
+        record_version(
+            cur,
+            session_id,
+            saved[2],
+            new_payload,
+            operations,
+            summary or f"Applied {len(operations)} operation(s)",
+        )
+    return saved
 
 
 @app.get("/health")
@@ -503,6 +559,8 @@ def tool_add_item(session_id: str, body: AddItemBody, request: Request):
                         new_payload = apply_item_enrichment(
                             new_payload, body.section, new_id, enrichment
                         )
+                item = get_item(new_payload, body.section, new_id)
+                new_payload = sync_facts_from_item(new_payload, body.section, item)
             except KeyError as err:
                 raise HTTPException(status_code=404, detail=str(err)) from err
             except ValueError as err:
@@ -645,6 +703,188 @@ def tool_undo(session_id: str, request: Request):
     }
 
 
+@app.post("/resume/{session_id}/mutate")
+def mutate_resume(session_id: str, body: MutateBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                require_basics_verified(previous)
+                result, trace = run_mutation(previous, body.message)
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            trace_id = log_trace(cur, session_id, "mutate", body.message, trace)
+
+            if result.clarification and not result.applied:
+                conn.commit()
+                return {
+                    "sessionId": session_id,
+                    "version": row[2],
+                    "mutated": False,
+                    "clarification": result.clarification,
+                    "diff": result.diff,
+                    "traceId": trace_id,
+                }
+
+            if not result.applied and result.payload == previous:
+                conn.commit()
+                return {
+                    "sessionId": session_id,
+                    "version": row[2],
+                    "mutated": False,
+                    "message": result.clarification or "No changes applied",
+                    "traceId": trace_id,
+                }
+
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                result.payload,
+                operations=result.applied,
+                summary="; ".join(result.diff[:3]) if result.diff else "Mutation",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "mutated": True,
+        "applied": result.applied,
+        "diff": result.diff,
+        "clarification": result.clarification,
+        "traceId": trace_id,
+    }
+
+
+@app.get("/resume/{session_id}/versions")
+def get_versions(session_id: str, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            load_snapshot(cur, session_id, get_current_user(request))
+            versions = list_versions(cur, session_id)
+    return {"sessionId": session_id, "versions": versions}
+
+
+@app.post("/resume/{session_id}/versions/{version_num}/restore")
+def restore_version(session_id: str, version_num: int, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            snapshot = get_version_snapshot(cur, session_id, version_num)
+            if snapshot is None:
+                raise HTTPException(status_code=404, detail="version_not_found")
+            restored = normalize_payload(snapshot)
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                restored,
+                operations=[{"type": "RESTORE", "version": version_num}],
+                summary=f"Restored version {version_num}",
+            )
+        conn.commit()
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "restoredFrom": version_num,
+    }
+
+
+@app.post("/resume/{session_id}/retrieve")
+def retrieve_career_evidence(session_id: str, body: RetrieveBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+    payload = normalize_payload(row[1])
+    evidence = retrieve_evidence(payload, body.query, section=body.section)
+    return {"sessionId": session_id, **evidence}
+
+
+@app.post("/resume/{session_id}/analyze-jd")
+def analyze_jd(session_id: str, body: AnalyzeJdBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                require_basics_verified(previous)
+                analysis = analyze_job_description(previous, body.jobDescription)
+                new_payload = previous
+                variant_id = None
+                if body.createVariant:
+                    new_payload = create_job_variant(
+                        previous,
+                        body.jobDescription,
+                        name=body.variantName,
+                    )
+                    variants = new_payload.get("variants") or {}
+                    variant_id = next(
+                        (vid for vid in variants if vid.startswith("variant_")),
+                        None,
+                    )
+                trace_id = log_trace(
+                    cur,
+                    session_id,
+                    "analyze_jd",
+                    body.jobDescription[:500],
+                    {"analysis": analysis, "variantId": variant_id},
+                )
+                if body.createVariant and new_payload != previous:
+                    saved = _save_payload(
+                        cur,
+                        session_id,
+                        previous,
+                        new_payload,
+                        operations=[{"type": "CREATE_VARIANT", "variantId": variant_id}],
+                        summary="Job-specific variant created",
+                    )
+                    out_payload = saved[1]
+                    out_version = saved[2]
+                else:
+                    out_payload = previous
+                    out_version = row[2]
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+        conn.commit()
+
+    return {
+        "sessionId": session_id,
+        "payload": out_payload,
+        "version": out_version,
+        "analysis": analysis,
+        "variantId": variant_id,
+        "traceId": trace_id,
+    }
+
+
+@app.get("/resume/{session_id}/claims/{claim_id}/provenance")
+def get_claim_provenance(session_id: str, claim_id: str, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+    payload = normalize_payload(row[1])
+    prov = claim_provenance(payload, claim_id)
+    if prov is None:
+        raise HTTPException(status_code=404, detail="claim_not_found")
+    return {"sessionId": session_id, **prov}
+
+
+@app.get("/traces/{trace_id}")
+def read_trace(trace_id: int, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            trace = get_trace(cur, trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="trace_not_found")
+    return trace
+
+
 @app.post("/chat")
 def chat(body: ChatBody, request: Request):
     with psycopg.connect(DATABASE_URL) as conn:
@@ -661,25 +901,21 @@ def chat(body: ChatBody, request: Request):
             except Exception as err:
                 raise HTTPException(status_code=500, detail=str(err)) from err
 
-            mutated = any(
-                call.get("result", {}).get("mutated", True)
-                for call in result["toolsCalled"]
-            )
+            new_payload = normalize_payload(result["payload"])
+            mutated = new_payload != previous_payload
             if mutated:
-                push_undo(cur, body.sessionId, previous_payload)
-
-                cur.execute(
-                    """
-                    UPDATE resume_snapshots
-                    SET payload = %s::jsonb,
-                        version = version + 1,
-                        updated_at = now()
-                    WHERE session_id = %s
-                    RETURNING session_id, payload, version
-                    """,
-                    (json.dumps(result["payload"]), body.sessionId),
+                applied = []
+                for call in result.get("toolsCalled") or []:
+                    if call.get("name") == "mutate":
+                        applied = call.get("result", {}).get("applied") or []
+                saved = _save_payload(
+                    cur,
+                    body.sessionId,
+                    previous_payload,
+                    new_payload,
+                    operations=applied or [{"type": "CHAT"}],
+                    summary="; ".join(result.get("diff") or [])[:200] or "Chat update",
                 )
-                saved = cur.fetchone()
             else:
                 saved = (body.sessionId, previous_payload, version)
         conn.commit()

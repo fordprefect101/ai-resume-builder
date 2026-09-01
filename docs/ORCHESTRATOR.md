@@ -69,8 +69,7 @@ Orchestrator does **not** unlock control of the resume. Control already lives in
    - tighten / polish bullets (already partly enrichment)  
    - tailor view for a job description (change `includedIds` / order / summary via tools)  
    - “one page” density check (advisory first; mutations still via tools)  
-4. **Product completeness in parallel** (not orchestrator work): SMTP, PDF export, a couple of templates — see [V1_DEFERRED.md](./V1_DEFERRED.md).
-5. **Later expansions** still orchestrator → tools on the same inventory: multi-view / role resumes, stronger JD matching. Heavier memory/retrieval ideas live in [phase-memory-intelligence.md](./phase-memory-intelligence.md).
+4. **Later expansions** still orchestrator → tools on the same inventory: multi-view / role resumes, version history, JD tailoring with provenance — see [V2.md](./V2.md).
 
 ---
 
@@ -124,8 +123,6 @@ Auto-apply only for low-risk polish already covered by enrichment flags.
 
 ## Related
 
+- [V2.md](./V2.md) — project direction and target architecture  
 - [resume-payload.md](./resume-payload.md) — inventory vs view  
-- [V1_DEFERRED.md](./V1_DEFERRED.md) — SMTP, export, multi-resume, …  
-- [V1_REMAINING.md](./V1_REMAINING.md) — shipped v1 surface  
-- [phase-memory-intelligence.md](./phase-memory-intelligence.md) — later retrieval / memory / scoring  
-- [AI_IMPLEMENTATION_PLAN.md](./AI_IMPLEMENTATION_PLAN.md) — earlier phased plan (partially superseded by generic tools)
+- [boundary-map.md](./boundary-map.md) — code layout

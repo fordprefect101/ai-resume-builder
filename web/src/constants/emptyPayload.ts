@@ -1,7 +1,7 @@
 import type { ResumePayload } from '../types/resume'
 
 export const EMPTY_PAYLOAD: ResumePayload = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   intake: { status: 'not_started', basicsVerified: false },
   inventory: {
     basics: {
@@ -30,4 +30,7 @@ export const EMPTY_PAYLOAD: ResumePayload = {
     },
     sectionOrder: ['experience', 'projects', 'education', 'achievements'],
   },
+  facts: [],
+  claims: [],
+  variants: {},
 }

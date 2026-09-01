@@ -1,3 +1,27 @@
+export type CareerFact = {
+  id: string
+  content: string
+  context?: { section?: string; itemId?: string; field?: string }
+  source?: string
+}
+
+export type DerivedClaim = {
+  id: string
+  content: string
+  supportedBy: string[]
+  variantId?: string
+  status?: string
+}
+
+export type ResumeVariant = {
+  id: string
+  name: string
+  summary?: string
+  includedIds: Record<string, string[]>
+  sectionOrder: string[]
+  generatedClaims?: string[]
+}
+
 export type ResumeItem = {
   id: string
   status?: string
@@ -10,7 +34,7 @@ export type ResumeSection = {
 }
 
 export type ResumePayload = {
-  schemaVersion: 3
+  schemaVersion: 3 | 4
   intake?: {
     status?: string
     basicsVerified?: boolean
@@ -34,13 +58,16 @@ export type ResumePayload = {
     includedIds: Record<string, string[]>
     sectionOrder: string[]
   }
+  facts?: CareerFact[]
+  claims?: DerivedClaim[]
+  variants?: Record<string, ResumeVariant>
 }
 
 export function isResumePayload(value: unknown): value is ResumePayload {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<ResumePayload>
   return Boolean(
-    payload.schemaVersion === 3 &&
+    (payload.schemaVersion === 3 || payload.schemaVersion === 4) &&
       payload.inventory?.basics &&
       payload.inventory?.sections &&
       payload.resume?.includedIds &&
@@ -72,4 +99,17 @@ export function githubHandleFromPayload(payload: ResumePayload): string {
 
 export function linkedinUrlFromPayload(payload: ResumePayload): string {
   return linkUrl(payload.inventory.basics.links, ['linkedin'])
+}
+
+export function activeVariantView(payload: ResumePayload, variantId?: string | null) {
+  if (!variantId || !payload.variants?.[variantId]) {
+    return payload.resume
+  }
+  const v = payload.variants[variantId]
+  return {
+    title: v.name,
+    summary: v.summary,
+    includedIds: v.includedIds,
+    sectionOrder: v.sectionOrder,
+  }
 }

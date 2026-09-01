@@ -140,3 +140,109 @@ export async function updateResumeBasics(
   }
   return res.json()
 }
+
+export type MutateResponse = ResumeResponse & {
+  mutated?: boolean
+  applied?: unknown[]
+  diff?: string[]
+  clarification?: string
+  traceId?: number
+}
+
+export async function mutateResume(
+  sessionId: string,
+  message: string
+): Promise<MutateResponse> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/mutate`,
+    {
+      ...creds,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    }
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Mutate failed: ${res.status}`))
+  }
+  return res.json()
+}
+
+export type VersionEntry = {
+  version: number
+  summary: string
+  operations: unknown[]
+  createdAt: string | null
+}
+
+export async function getVersionHistory(sessionId: string): Promise<{
+  sessionId: string
+  versions: VersionEntry[]
+}> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/versions`,
+    creds
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Versions failed: ${res.status}`))
+  }
+  return res.json()
+}
+
+export async function restoreVersion(
+  sessionId: string,
+  version: number
+): Promise<ResumeResponse & { restoredFrom: number }> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/versions/${version}/restore`,
+    { ...creds, method: 'POST' }
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Restore failed: ${res.status}`))
+  }
+  return res.json()
+}
+
+export async function analyzeJobDescription(
+  sessionId: string,
+  jobDescription: string,
+  variantName?: string
+): Promise<
+  ResumeResponse & {
+    analysis: unknown
+    variantId?: string
+    traceId?: number
+  }
+> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/analyze-jd`,
+    {
+      ...creds,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobDescription,
+        createVariant: true,
+        variantName,
+      }),
+    }
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `JD analysis failed: ${res.status}`))
+  }
+  return res.json()
+}
+
+export async function getClaimProvenance(
+  sessionId: string,
+  claimId: string
+): Promise<{ claim: unknown; facts: unknown[] }> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/claims/${encodeURIComponent(claimId)}/provenance`,
+    creds
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Provenance failed: ${res.status}`))
+  }
+  return res.json()
+}

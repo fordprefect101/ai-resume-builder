@@ -1,22 +1,26 @@
-"""Normalize older payloads to schemaVersion 3 (sections + includedIds maps)."""
+"""Normalize older payloads to schemaVersion 3/4 (sections + includedIds maps)."""
 
 from section_registry import (
     BUILTIN_SECTION_ORDER,
     empty_included_ids,
     empty_sections_bag,
 )
+from facts import ensure_facts
 
 
 def normalize_payload(payload: dict) -> dict:
     if not isinstance(payload, dict):
-        return _blank_v3()
+        return _blank_v4()
 
-    if payload.get("schemaVersion") == 3 and isinstance(
+    if payload.get("schemaVersion") in (3, 4) and isinstance(
         (payload.get("inventory") or {}).get("sections"), dict
     ):
-        return _ensure_intake_flags(payload)
+        out = _ensure_intake_flags(payload)
+        if out.get("schemaVersion") != 4:
+            out = {**out, "schemaVersion": 4}
+        return ensure_facts(out)
 
-    return _ensure_intake_flags(_v2_to_v3(payload))
+    return ensure_facts(_ensure_intake_flags(_v2_to_v4(payload)))
 
 
 def _ensure_intake_flags(payload: dict) -> dict:
@@ -28,6 +32,12 @@ def _ensure_intake_flags(payload: dict) -> dict:
     next_payload = dict(payload)
     next_payload["intake"] = intake
     return next_payload
+
+
+def _blank_v4() -> dict:
+    base = _blank_v3()
+    base["schemaVersion"] = 4
+    return ensure_facts(base)
 
 
 def _blank_v3() -> dict:
@@ -101,7 +111,7 @@ def _v2_to_v3(payload: dict) -> dict:
     order = [s for s in order if s in sections] or list(BUILTIN_SECTION_ORDER)
 
     return {
-        "schemaVersion": 3,
+        "schemaVersion": 4,
         "intake": {
             "status": "not_started",
             "basicsVerified": False,
@@ -124,4 +134,16 @@ def _v2_to_v3(payload: dict) -> dict:
             "includedIds": included,
             "sectionOrder": order,
         },
+        "facts": [],
+        "claims": [],
+        "variants": {},
     }
+
+
+def _v2_to_v4(payload: dict) -> dict:
+    v3 = _v2_to_v3(payload)
+    v3["schemaVersion"] = 4
+    v3["facts"] = []
+    v3["claims"] = []
+    v3["variants"] = {}
+    return v3

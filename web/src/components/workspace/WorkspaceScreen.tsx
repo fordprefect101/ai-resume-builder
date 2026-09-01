@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { AuthUser } from '../../api/authApi'
 import type { ResumePayload } from '../../types/resume'
 import { ResumeEditor, ResumePreview } from '../resume'
+import { IntelligencePanel } from '../intelligence'
 import { VoiceOrb, type VoiceMood } from '../voice'
 
 type Props = {
@@ -39,6 +40,10 @@ type Props = {
   onPayloadTextChange: (value: string) => void
   onLoad: () => void
   onSaveJson: () => void
+  onPayloadUpdate: (payload: unknown, version: number) => void
+  onStatus: (msg: string) => void
+  activeVariantId: string | null
+  onVariantChange: (id: string | null) => void
   authModal: ReactNode
 }
 
@@ -70,6 +75,10 @@ export function WorkspaceScreen({
   onPayloadTextChange,
   onLoad,
   onSaveJson,
+  onPayloadUpdate,
+  onStatus,
+  activeVariantId,
+  onVariantChange,
   authModal,
 }: Props) {
   return (
@@ -122,28 +131,39 @@ export function WorkspaceScreen({
         <span>{status || 'Your changes stay with this resume as you go.'}</span>
       </div>
 
-      <div className="builder-split">
-        <ResumeEditor
-          payload={payload}
-          busyAction={busyAction}
-          contentLocked={contentLocked}
-          onConfirmBasics={onConfirmBasics}
-          onBasicsDirtyChange={onBasicsDirtyChange}
-          onMoveSection={onMoveSection}
-          onMoveItem={onMoveItem}
-          onToggleItem={onToggleItem}
-          onStartVoice={onStartVoice}
-        />
+      <div className="builder-split builder-split-v2">
+        <div className="builder-left">
+          <IntelligencePanel
+            sessionId={sessionId}
+            payload={payload}
+            contentLocked={contentLocked}
+            onPayload={onPayloadUpdate}
+            onStatus={onStatus}
+            activeVariantId={activeVariantId}
+            onVariantChange={onVariantChange}
+          />
+          <ResumeEditor
+            payload={payload}
+            busyAction={busyAction}
+            contentLocked={contentLocked}
+            onConfirmBasics={onConfirmBasics}
+            onBasicsDirtyChange={onBasicsDirtyChange}
+            onMoveSection={onMoveSection}
+            onMoveItem={onMoveItem}
+            onToggleItem={onToggleItem}
+            onStartVoice={onStartVoice}
+          />
+        </div>
         <section className="preview-pane">
           <div className="preview-pane-heading">
             <div>
               <p className="eyebrow">Live preview</p>
               <h2>Your document</h2>
             </div>
-            <span>Updates as you talk</span>
+            <span>{activeVariantId ? 'Variant view' : 'Default view'}</span>
           </div>
           <div className="paper-stage">
-            <ResumePreview payload={payload} />
+            <ResumePreview payload={payload} variantId={activeVariantId} />
           </div>
         </section>
       </div>

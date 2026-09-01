@@ -1,6 +1,8 @@
-# Resume payload shape (v3)
+# Resume payload shape (v3 / v4)
 
 Stored in `resume_snapshots.payload`. Example: `api/resume-schema.example.json`.
+
+**V4 adds:** `facts[]`, `claims[]`, `variants{}` for provenance and job-specific resume views. v3 payloads are normalized to v4 on read.
 
 **Idea:** `inventory` is the career truth. `resume` is a view (what to show + order). Soft remove = drop an id from `resume.includedIds[section]`; do not delete the inventory item.
 
@@ -12,7 +14,7 @@ Section field rules (required fields, enrich/polish flags) live in `api/section_
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `schemaVersion` | number | yes | Use `3` |
+| `schemaVersion` | number | yes | Use `4` (v3 normalized on read) |
 | `intake` | object | yes | Intake status + confirmation flags |
 | `inventory` | object | yes | Canonical career data |
 | `resume` | object | yes | Current resume view |

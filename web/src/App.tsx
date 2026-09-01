@@ -40,6 +40,7 @@ function App() {
   const [basicsDirty, setBasicsDirty] = useState(false)
   const [version, setVersion] = useState<number | null>(null)
   const [status, setStatus] = useState('')
+  const [activeVariantId, setActiveVariantId] = useState<string | null>(null)
   const voiceRef = useRef<RealtimeHandles | null>(null)
   const [voiceActive, setVoiceActive] = useState(false)
   const [voiceMood, setVoiceMood] = useState<VoiceMood>('idle')
@@ -237,6 +238,11 @@ function App() {
     voiceRef.current = null
     setVoiceActive(false)
     setVoice('idle')
+  }
+
+  function handlePayloadUpdate(nextPayload: unknown, nextVersion: number) {
+    applyPayload(nextPayload)
+    setVersion(nextVersion)
   }
 
   async function handleLoad() {
@@ -535,6 +541,10 @@ function App() {
       onPayloadTextChange={setPayloadText}
       onLoad={handleLoad}
       onSaveJson={handleSave}
+      onPayloadUpdate={handlePayloadUpdate}
+      onStatus={setStatus}
+      activeVariantId={activeVariantId}
+      onVariantChange={setActiveVariantId}
       authModal={authModal}
     />
   )

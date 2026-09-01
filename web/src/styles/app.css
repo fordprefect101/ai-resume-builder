@@ -445,6 +445,132 @@
   grid-template-columns: minmax(320px, 40%) minmax(0, 60%);
 }
 
+.builder-split-v2 {
+  grid-template-columns: minmax(380px, 45%) minmax(0, 55%);
+}
+
+.builder-left {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.intelligence-panel {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  max-height: 42vh;
+  overflow-y: auto;
+}
+
+.intelligence-panel h2 {
+  margin: 0 0 var(--space-3);
+  font-size: 18px;
+}
+
+.intel-chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.intel-msg {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.intel-msg-user {
+  background: rgb(233 130 98 / 12%);
+}
+
+.intel-msg-assistant {
+  background: rgb(113 134 107 / 10%);
+}
+
+.intel-msg pre {
+  margin: var(--space-1) 0 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+.intel-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.intel-input-row textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.intel-section {
+  margin-top: var(--space-3);
+}
+
+.version-list,
+.claim-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-2) 0 0;
+}
+
+.version-list li,
+.claim-list li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.variant-tabs button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.provenance-box {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.intel-facts-count {
+  margin-top: var(--space-3);
+}
+
+.resume-variant-title {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.builder-split-v2 .resume-editor {
+  flex: 1;
+  border-right: none;
+  overflow-y: auto;
+}
+
 .resume-editor {
   overflow-y: auto;
   padding: var(--space-5);

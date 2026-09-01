@@ -1,0 +1,1 @@
+export { IntelligencePanel } from './IntelligencePanel'

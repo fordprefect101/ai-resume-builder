@@ -556,3 +556,112 @@ def get_item(payload: dict, section: str, item_id: str) -> dict:
     if item is None:
         raise KeyError(f"item not found in {section}: {item_id}")
     return item
+
+
+def update_item(
+    payload: dict,
+    section: str,
+    item_id: str,
+    changes: dict,
+) -> dict:
+    """Merge changes into an existing inventory item."""
+    require_basics_verified(payload)
+    profile = get_section_profile(section)
+    inventory, sections, bag = _ensure_section(payload, section)
+    items = []
+    found = False
+    allowed = set(profile.get("requiredFields") or []) | set(
+        profile.get("optionalFields") or []
+    ) | {"id", "status"}
+
+    for item in bag["items"]:
+        if item.get("id") != item_id:
+            items.append(item)
+            continue
+        found = True
+        updated = dict(item)
+        for key, value in (changes or {}).items():
+            if key not in allowed:
+                continue
+            if key == "bullets" and isinstance(value, dict):
+                if "add" in value:
+                    bullets = list(updated.get("bullets") or [])
+                    for b in value["add"]:
+                        if b and b not in bullets:
+                            bullets.append(b)
+                    updated["bullets"] = bullets
+                if "remove" in value:
+                    remove_set = set(value["remove"])
+                    updated["bullets"] = [
+                        b for b in (updated.get("bullets") or []) if b not in remove_set
+                    ]
+                if "set" in value:
+                    updated["bullets"] = list(value["set"])
+            elif key == "technologies" and isinstance(value, dict):
+                techs = list(updated.get("technologies") or [])
+                if "add" in value:
+                    for t in value["add"]:
+                        if t and t not in techs:
+                            techs.append(t)
+                updated["technologies"] = techs
+            elif key == "skills" and isinstance(value, dict):
+                skills = list(updated.get("skills") or [])
+                if "add" in value:
+                    for s in value["add"]:
+                        if s and s not in skills:
+                            skills.append(s)
+                updated["skills"] = skills
+            else:
+                updated[key] = value
+        items.append(updated)
+
+    if not found:
+        raise KeyError(f"item not found in {section}: {item_id}")
+
+    bag["items"] = items
+    sections[section] = bag
+    inventory["sections"] = sections
+    return {**payload, "inventory": inventory}
+
+
+def archive_item(payload: dict, section: str, item_id: str) -> dict:
+    """Mark item archived and exclude from resume view."""
+    payload = update_item(payload, section, item_id, {"status": "archived"})
+    try:
+        payload = exclude_from_resume(payload, section, item_id)
+    except (KeyError, ValueError):
+        pass
+    return payload
+
+
+def set_skills_edit(payload: dict, skills: list[str]) -> dict:
+    """Set skills outside intake."""
+    require_basics_verified(payload)
+    inventory = dict(payload.get("inventory") or {})
+    cleaned: list[str] = []
+    for skill in skills:
+        value = str(skill).strip()
+        if value and value.lower() not in {s.lower() for s in cleaned}:
+            cleaned.append(value)
+    inventory["skills"] = cleaned
+    return {**payload, "inventory": inventory}
+
+
+def reorder_skills(payload: dict, skills: list[str]) -> dict:
+    """Reorder flat skills list to exact order given."""
+    require_basics_verified(payload)
+    current = list((payload.get("inventory") or {}).get("skills") or [])
+    current_set = set(current)
+    ordered = [s for s in skills if s in current_set]
+    for s in current:
+        if s not in ordered:
+            ordered.append(s)
+    inventory = dict(payload.get("inventory") or {})
+    inventory["skills"] = ordered
+    return {**payload, "inventory": inventory}
+
+
+def set_summary(payload: dict, summary: str) -> dict:
+    resume = dict(payload.get("resume") or {})
+    resume["summary"] = str(summary or "").strip()
+    return {**payload, "resume": resume}
