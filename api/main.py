@@ -164,13 +164,20 @@ class RetrieveBody(BaseModel):
 def _save_payload(
     cur,
     session_id: str,
-    previous: dict,
+    previous: dict | None,
     new_payload: dict,
     *,
-    operations: list | None = None,
-    summary: str = "",
+    operations: list,
+    summary: str,
+    undoable: bool = True,
 ) -> tuple:
-    push_undo(cur, session_id, previous)
+    """
+    The single door for changing a stored resume: normalizes the payload, keeps
+    an undo copy, bumps the version, and records a history entry.
+    """
+    new_payload = normalize_payload(new_payload)
+    if undoable and previous is not None:
+        push_undo(cur, session_id, previous)
     cur.execute(
         """
         UPDATE resume_snapshots
@@ -183,14 +190,33 @@ def _save_payload(
         (json.dumps(new_payload), session_id),
     )
     saved = cur.fetchone()
-    if operations is not None and saved:
+    if saved:
+        record_version(cur, session_id, saved[2], new_payload, operations, summary)
+    return saved
+
+
+def _create_snapshot(
+    cur,
+    session_id: str,
+    payload: dict,
+    user_id: str | None,
+    *,
+    summary: str,
+) -> tuple:
+    """The single door for creating a stored resume; records its first history entry."""
+    payload = normalize_payload(payload)
+    cur.execute(
+        """
+        INSERT INTO resume_snapshots (session_id, payload, user_id)
+        VALUES (%s, %s::jsonb, %s)
+        RETURNING session_id, payload, version
+        """,
+        (session_id, json.dumps(payload), user_id),
+    )
+    saved = cur.fetchone()
+    if saved:
         record_version(
-            cur,
-            session_id,
-            saved[2],
-            new_payload,
-            operations,
-            summary or f"Applied {len(operations)} operation(s)",
+            cur, session_id, saved[2], payload, [{"type": "CREATE"}], summary
         )
     return saved
 
@@ -227,15 +253,13 @@ def start_intake(request: Request):
                         else "intake",
                     }
             session_id = f"intake_{uuid.uuid4().hex[:12]}"
-            cur.execute(
-                """
-                INSERT INTO resume_snapshots (session_id, payload, user_id)
-                VALUES (%s, %s::jsonb, %s)
-                RETURNING session_id, payload, version
-                """,
-                (session_id, json.dumps(payload), user["id"] if user else None),
+            saved = _create_snapshot(
+                cur,
+                session_id,
+                payload,
+                user["id"] if user else None,
+                summary="Resume created",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -274,31 +298,30 @@ def put_resume(session_id: str, body: PutResumeBody, request: Request):
             )
             existing = cur.fetchone()
             if existing:
-                load_snapshot(cur, session_id, user)
-            elif user:
-                owned = user_resume_session(cur, user["id"])
-                if owned:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="This account already has a resume",
-                    )
-            cur.execute(
-                """
-                INSERT INTO resume_snapshots (session_id, payload, user_id)
-                VALUES (%s, %s::jsonb, %s)
-                ON CONFLICT (session_id) DO UPDATE
-                  SET payload = EXCLUDED.payload,
-                      version = resume_snapshots.version + 1,
-                      updated_at = now()
-                RETURNING session_id, payload, version
-                """,
-                (
+                current = load_snapshot(cur, session_id, user)
+                row = _save_payload(
+                    cur,
                     session_id,
-                    json.dumps(payload),
-                    existing[1] if existing else (user["id"] if user else None),
-                ),
-            )
-            row = cur.fetchone()
+                    normalize_payload(current[1]),
+                    payload,
+                    operations=[{"type": "REPLACE"}],
+                    summary="Record replaced",
+                )
+            else:
+                if user:
+                    owned = user_resume_session(cur, user["id"])
+                    if owned:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="This account already has a resume",
+                        )
+                row = _create_snapshot(
+                    cur,
+                    session_id,
+                    payload,
+                    user["id"] if user else None,
+                    summary="Resume created",
+                )
         conn.commit()
 
     return {
@@ -353,19 +376,14 @@ def update_resume_basics(session_id: str, body: UpdateBasicsBody, request: Reque
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{"type": "TOOL", "tool": "update_basics"}],
+                summary="Contact details updated",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -391,19 +409,14 @@ def tool_set_skills(session_id: str, body: SetSkillsBody, request: Request):
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{"type": "TOOL", "tool": "set_skills"}],
+                summary="Skills updated",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -428,19 +441,14 @@ def tool_complete_intake(session_id: str, body: CompleteIntakeBody, request: Req
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{"type": "TOOL", "tool": "complete_intake"}],
+                summary="Setup completed",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -468,19 +476,19 @@ def tool_exclude_from_resume(session_id: str, body: SectionItemBody, request: Re
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{
+                        "type": "TOOL",
+                        "tool": "exclude_from_resume",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                    }],
+                summary=f"Hid an entry in {body.section}",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -508,19 +516,19 @@ def tool_include_on_resume(session_id: str, body: SectionItemBody, request: Requ
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{
+                        "type": "TOOL",
+                        "tool": "include_on_resume",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                    }],
+                summary=f"Showed an entry in {body.section}",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -566,19 +574,19 @@ def tool_add_item(session_id: str, body: AddItemBody, request: Request):
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{
+                        "type": "TOOL",
+                        "tool": "add_item",
+                        "section": body.section,
+                        "itemId": new_id,
+                    }],
+                summary=f"Added an entry to {body.section}",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -605,19 +613,14 @@ def tool_reorder_sections(session_id: str, body: ReorderSectionsBody, request: R
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{"type": "TOOL", "tool": "reorder_sections"}],
+                summary="Sections reordered",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -642,19 +645,14 @@ def tool_reorder_items(session_id: str, body: ReorderItemsBody, request: Request
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
 
-            push_undo(cur, session_id, previous)
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(new_payload), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{"type": "TOOL", "tool": "reorder_items", "section": body.section}],
+                summary=f"Entries reordered in {body.section}",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {
@@ -679,18 +677,15 @@ def tool_undo(session_id: str, request: Request):
             if previous is None:
                 raise HTTPException(status_code=404, detail="nothing_to_undo")
 
-            cur.execute(
-                """
-                UPDATE resume_snapshots
-                SET payload = %s::jsonb,
-                    version = version + 1,
-                    updated_at = now()
-                WHERE session_id = %s
-                RETURNING session_id, payload, version
-                """,
-                (json.dumps(previous), session_id),
+            saved = _save_payload(
+                cur,
+                session_id,
+                None,
+                previous,
+                operations=[{"type": "UNDO"}],
+                summary="Undid last change",
+                undoable=False,
             )
-            saved = cur.fetchone()
             if not saved:
                 raise HTTPException(status_code=404, detail="not_found")
         conn.commit()
@@ -954,15 +949,13 @@ async def import_resume_pdf(request: Request, file: UploadFile = File(...)):
                         status_code=409,
                         detail="This account already has a resume. Open it from the start screen.",
                     )
-            cur.execute(
-                """
-                INSERT INTO resume_snapshots (session_id, payload, user_id)
-                VALUES (%s, %s::jsonb, %s)
-                RETURNING session_id, payload, version
-                """,
-                (session_id, json.dumps(payload), user["id"] if user else None),
+            saved = _create_snapshot(
+                cur,
+                session_id,
+                payload,
+                user["id"] if user else None,
+                summary="Imported from PDF",
             )
-            saved = cur.fetchone()
         conn.commit()
 
     return {

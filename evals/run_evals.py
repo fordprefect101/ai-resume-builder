@@ -3,12 +3,18 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
+
+# These evals never reach a database or a model; placeholders let main.py import.
+os.environ.setdefault("DATABASE_URL", "postgresql://unused-in-evals")
+os.environ.setdefault("OPENAI_API_KEY", "unused-in-evals")
 
 from context_selector import select_resume_context
 from claim_verify import verify_claim
@@ -405,6 +411,135 @@ def test_v5_rejects_unknown_labels() -> bool:
     return ok
 
 
+class _FakeCursor:
+    """Stands in for a database cursor: records statements, returns saved rows."""
+
+    def __init__(self, version: int = 1):
+        self.statements: list[tuple[str, tuple]] = []
+        self.version = version
+        self._row = None
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        text = " ".join(sql.split())
+        self.statements.append((text, params))
+        if text.startswith("UPDATE resume_snapshots"):
+            self.version += 1
+            self._row = (params[1], json.loads(params[0]), self.version)
+        elif text.startswith("INSERT INTO resume_snapshots"):
+            self._row = (params[0], json.loads(params[1]), self.version)
+        else:
+            self._row = None
+
+    def fetchone(self):
+        return self._row
+
+    def ran(self, prefix: str) -> list[tuple]:
+        return [params for text, params in self.statements if text.startswith(prefix)]
+
+
+def test_save_door() -> bool:
+    import main
+
+    problems = []
+    previous = load_fixture("sample_career.json")
+    # add_item leaves the new item without a story/writing marker until normalized.
+    untidy, new_id = add_item(
+        previous, "projects", {"name": "Side project", "bullets": ["Built it"]}
+    )
+
+    cur = _FakeCursor(version=7)
+    saved = main._save_payload(
+        cur,
+        "sess_1",
+        previous,
+        untidy,
+        operations=[{"type": "TOOL", "tool": "add_item"}],
+        summary="Added an entry to projects",
+    )
+    stored = saved[1]
+    if stored != normalize_payload(stored) or _copies_out_of_step(stored):
+        problems.append("stored record was not tidied before saving")
+    new_item = next(
+        i for i in stored["inventory"]["sections"]["projects"]["items"] if i["id"] == new_id
+    )
+    if "story" not in new_item or "writing" not in new_item:
+        problems.append("new entry saved without story/writing")
+    undo = cur.ran("INSERT INTO resume_undo")
+    if len(undo) != 1 or json.loads(undo[0][1]) != previous:
+        problems.append("undo copy of the previous record not kept")
+    history = cur.ran("INSERT INTO career_versions")
+    if len(history) != 1:
+        problems.append(f"history entries written={len(history)}")
+    else:
+        _sid, version_num, operations, snapshot, summary = history[0]
+        if (version_num, summary) != (8, "Added an entry to projects"):
+            problems.append(f"history entry={version_num, summary}")
+        if json.loads(snapshot) != stored or not json.loads(operations):
+            problems.append("history entry does not match what was stored")
+
+    cur = _FakeCursor(version=3)
+    main._save_payload(
+        cur,
+        "sess_1",
+        None,
+        previous,
+        operations=[{"type": "UNDO"}],
+        summary="Undid last change",
+        undoable=False,
+    )
+    if cur.ran("INSERT INTO resume_undo"):
+        problems.append("undo added itself to the undo list")
+    if len(cur.ran("INSERT INTO career_versions")) != 1:
+        problems.append("undo was not recorded in history")
+
+    cur = _FakeCursor(version=1)
+    created = main._create_snapshot(
+        cur, "sess_new", {}, None, summary="Resume created"
+    )
+    first = cur.ran("INSERT INTO career_versions")
+    if created[1].get("schemaVersion") != 5:
+        problems.append("new record not created in the current shape")
+    if len(first) != 1 or (first[0][1], first[0][4]) != (1, "Resume created"):
+        problems.append("new record has no first history entry")
+
+    ok = not problems
+    print(f"save_door: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_single_save_door() -> bool:
+    """No code outside the two shared functions may write a stored resume."""
+    allowed = {
+        "UPDATE resume_snapshots SET payload": {"_save_payload"},
+        "INSERT INTO resume_snapshots": {"_create_snapshot"},
+        "push_undo(": {"_save_payload"},
+        "record_version(": {"_save_payload", "_create_snapshot"},
+    }
+    offenders = []
+    endpoints = 0
+    for path in sorted((ROOT / "api").glob("*.py")):
+        source = path.read_text()
+        tree = ast.parse(source)
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = " ".join((ast.get_source_segment(source, node) or "").split())
+            if path.name == "main.py" and "_save_payload(" in body:
+                endpoints += 1
+            for needle, owners in allowed.items():
+                defining = needle.rstrip("(") in ("push_undo", "record_version") and (
+                    node.name == needle.rstrip("(")
+                )
+                if needle in body and node.name not in owners and not defining:
+                    offenders.append(f"{path.name}:{node.name} uses {needle!r}")
+    ok = not offenders and endpoints >= 12
+    print(
+        f"single_save_door: {'PASS' if ok else 'FAIL'} "
+        f"(functions saving through the door={endpoints}, offenders={offenders})"
+    )
+    return ok
+
+
 def main() -> int:
     tests = [
         test_entity_resolution,
@@ -418,6 +553,8 @@ def main() -> int:
         test_v5_label_defaults,
         test_v5_labels_survive_reload,
         test_v5_rejects_unknown_labels,
+        test_save_door,
+        test_single_save_door,
     ]
     results = [t() for t in tests]
     passed = sum(results)
