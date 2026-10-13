@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import uuid
 
+from claims import section_has_points, set_item_points
 from section_registry import (
     BUILTIN_SECTION_ORDER,
     format_unknown_section,
@@ -418,7 +419,12 @@ def add_item(
         order.append(section)
     resume["sectionOrder"] = order
 
-    return {**payload, "inventory": inventory, "resume": resume}, new_id
+    new_payload = {**payload, "inventory": inventory, "resume": resume}
+    if section_has_points(section):
+        new_payload = set_item_points(
+            new_payload, section, new_id, item.get("bullets")
+        )
+    return new_payload, new_id
 
 
 def apply_item_enrichment(
@@ -427,6 +433,7 @@ def apply_item_enrichment(
     inventory, sections, bag = _ensure_section(payload, section)
     items = []
     found = False
+    new_bullets = None
     for item in bag["items"]:
         if item.get("id") == item_id:
             found = True
@@ -436,9 +443,7 @@ def apply_item_enrichment(
             if "skills" in enrichment:
                 updated["skills"] = enrichment.get("skills") or []
             if "bullets" in enrichment:
-                updated["bullets"] = (
-                    enrichment.get("bullets") or updated.get("bullets") or []
-                )
+                new_bullets = enrichment.get("bullets") or updated.get("bullets") or []
             items.append(updated)
         else:
             items.append(item)
@@ -448,7 +453,10 @@ def apply_item_enrichment(
     bag["items"] = items
     sections[section] = bag
     inventory["sections"] = sections
-    return {**payload, "inventory": inventory}
+    new_payload = {**payload, "inventory": inventory}
+    if new_bullets is not None:
+        new_payload = set_item_points(new_payload, section, item_id, new_bullets)
+    return new_payload
 
 
 def reorder_sections(payload: dict, section_order: list[str]) -> dict:
@@ -570,6 +578,7 @@ def update_item(
     inventory, sections, bag = _ensure_section(payload, section)
     items = []
     found = False
+    new_bullets = None
     allowed = set(profile.get("requiredFields") or []) | set(
         profile.get("optionalFields") or []
     ) | {"id", "status"}
@@ -583,20 +592,21 @@ def update_item(
         for key, value in (changes or {}).items():
             if key not in allowed:
                 continue
-            if key == "bullets" and isinstance(value, dict):
+            if key == "bullets":
+                if not isinstance(value, dict):
+                    new_bullets = value or []
+                    continue
+                bullets = list(updated.get("bullets") or [])
                 if "add" in value:
-                    bullets = list(updated.get("bullets") or [])
                     for b in value["add"]:
                         if b and b not in bullets:
                             bullets.append(b)
-                    updated["bullets"] = bullets
                 if "remove" in value:
                     remove_set = set(value["remove"])
-                    updated["bullets"] = [
-                        b for b in (updated.get("bullets") or []) if b not in remove_set
-                    ]
+                    bullets = [b for b in bullets if b not in remove_set]
                 if "set" in value:
-                    updated["bullets"] = list(value["set"])
+                    bullets = list(value["set"])
+                new_bullets = bullets
             elif key == "technologies" and isinstance(value, dict):
                 techs = list(updated.get("technologies") or [])
                 if "add" in value:
@@ -621,7 +631,10 @@ def update_item(
     bag["items"] = items
     sections[section] = bag
     inventory["sections"] = sections
-    return {**payload, "inventory": inventory}
+    new_payload = {**payload, "inventory": inventory}
+    if new_bullets is not None:
+        new_payload = set_item_points(new_payload, section, item_id, new_bullets)
+    return new_payload
 
 
 def archive_item(payload: dict, section: str, item_id: str) -> dict:

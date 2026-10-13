@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 
 from facts import fact_by_id
+from section_registry import get_section_profile
 
 POINT_STATUSES = ("unchecked", "supported", "needs_review", "user_edited")
 POINT_ORIGINS = ("legacy", "ai", "user", "imported")
@@ -66,6 +67,10 @@ def is_point(claim: dict) -> bool:
     return bool(claim.get("itemId"))
 
 
+def section_has_points(section: str) -> bool:
+    return bool(get_section_profile(section).get("polishBullets"))
+
+
 def points_for_item(payload: dict, section: str, item_id: str) -> list[dict]:
     points = [
         c
@@ -73,6 +78,108 @@ def points_for_item(payload: dict, section: str, item_id: str) -> list[dict]:
         if c.get("section") == section and c.get("itemId") == item_id
     ]
     return sorted(points, key=lambda c: c.get("order", 0))
+
+
+def clean_point_texts(texts) -> list[str]:
+    if isinstance(texts, str):
+        texts = [texts]
+    return [t for t in (texts or []) if isinstance(t, str) and t.strip()]
+
+
+def reconcile_points(
+    existing: list[dict],
+    section: str,
+    item_id: str,
+    texts,
+    *,
+    origin: str = "legacy",
+) -> list[dict]:
+    """
+    Points for one item in the order of `texts`. A point whose text is unchanged
+    keeps its id and labels; new text gets a new point.
+    """
+    pool: dict[str, list[dict]] = {}
+    for point in sorted(existing, key=lambda c: c.get("order", 0)):
+        pool.setdefault(point.get("content"), []).append(point)
+
+    points: list[dict] = []
+    seen: dict[str, int] = {}
+    for order, text in enumerate(clean_point_texts(texts)):
+        occurrence = seen.get(text, 0)
+        seen[text] = occurrence + 1
+        if pool.get(text):
+            points.append(with_point_defaults({**pool[text].pop(0), "order": order}))
+        else:
+            points.append(
+                new_point(
+                    section,
+                    item_id,
+                    text,
+                    order,
+                    occurrence=occurrence,
+                    origin=origin,
+                )
+            )
+    return points
+
+
+def rebuild_bullets(payload: dict, only: tuple[str, str] | None = None) -> dict:
+    """
+    The only place item.bullets is written: a display copy of the item's points.
+    `only=(section, item_id)` limits it to one item; without it every item is
+    rebuilt, so the payload must already be normalized.
+    """
+    grouped: dict[tuple, list[dict]] = {}
+    for claim in payload.get("claims") or []:
+        if is_point(claim):
+            key = (claim.get("section"), claim.get("itemId"))
+            grouped.setdefault(key, []).append(claim)
+
+    inventory = dict(payload.get("inventory") or {})
+    sections = dict(inventory.get("sections") or {})
+    for section, bag in sections.items():
+        if not isinstance(bag, dict) or not section_has_points(section):
+            continue
+        items = []
+        for item in bag.get("items") or []:
+            if (
+                isinstance(item, dict)
+                and item.get("id")
+                and (only is None or only == (section, item["id"]))
+            ):
+                points = sorted(
+                    grouped.get((section, item["id"]), []),
+                    key=lambda c: c.get("order", 0),
+                )
+                item = {**item, "bullets": [p.get("content") for p in points]}
+            items.append(item)
+        sections[section] = {**bag, "items": items}
+    inventory["sections"] = sections
+    return {**payload, "inventory": inventory}
+
+
+def set_item_points(
+    payload: dict,
+    section: str,
+    item_id: str,
+    texts,
+    *,
+    origin: str = "legacy",
+) -> dict:
+    """The one way to change an item's points. Also refreshes its bullets copy."""
+    if not section_has_points(section):
+        raise ValueError(f"section does not carry points: {section}")
+    mine: list[dict] = []
+    others: list[dict] = []
+    for claim in payload.get("claims") or []:
+        if claim.get("section") == section and claim.get("itemId") == item_id:
+            mine.append(claim)
+        else:
+            others.append(claim)
+    points = reconcile_points(mine, section, item_id, texts, origin=origin)
+    return rebuild_bullets(
+        {**payload, "claims": others + points}, only=(section, item_id)
+    )
 
 
 def add_claim(

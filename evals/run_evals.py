@@ -17,6 +17,7 @@ from facts import add_fact, fact_by_id, sync_facts_from_item
 from payload_normalize import normalize_payload
 from op_validator import validate_operations
 from op_executor import execute_operations
+from resume_ops import add_item, apply_item_enrichment, archive_item, update_item
 
 
 def load_raw_fixture(name: str) -> dict:
@@ -33,6 +34,16 @@ def _point_items(payload: dict):
     for section in ("experience", "projects"):
         for item in sections[section]["items"]:
             yield section, item
+
+
+def _copies_out_of_step(payload: dict) -> list[str]:
+    """Items whose bullets (display copy) differ from their point records."""
+    return [
+        item["id"]
+        for section, item in _point_items(payload)
+        if item.get("bullets")
+        != [p["content"] for p in points_for_item(payload, section, item["id"])]
+    ]
 
 
 def test_entity_resolution() -> bool:
@@ -124,23 +135,146 @@ def test_v5_upgrade_is_stable() -> bool:
     return ok
 
 
-def test_v5_points_follow_bullets() -> bool:
+def test_v5_bullets_follow_points() -> bool:
     payload = load_fixture("sample_career.json")
-    before = {p["content"]: p["id"] for p in payload["claims"] if p.get("itemId")}
     generated = {"id": "claim_keepme", "content": "Generated", "supportedBy": []}
     payload["claims"] = [generated] + payload["claims"]
-    item = payload["inventory"]["sections"]["experience"]["items"][0]
-    item["bullets"] = item["bullets"] + ["Added Redis caching"]
-    after = normalize_payload(payload)
-    after_points = {p["content"]: p["id"] for p in after["claims"] if p.get("itemId")}
-    kept_ids = all(after_points.get(text) == pid for text, pid in before.items())
-    added = "Added Redis caching" in after_points
-    kept_generated = generated in after["claims"]
-    ok = kept_ids and added and kept_generated
+    items = payload["inventory"]["sections"]["experience"]["items"]
+    original = list(items[0]["bullets"])
+
+    # Tampering with the display copy is undone from the points.
+    items[0]["bullets"] = ["Typed straight into the copy"]
+    restored = normalize_payload(payload)
+    restored_item = restored["inventory"]["sections"]["experience"]["items"][0]
+    tamper_undone = restored_item["bullets"] == original
+
+    # Changing the point records changes the display copy.
+    edited = json.loads(json.dumps(restored))
+    point = next(c for c in edited["claims"] if c.get("itemId") == items[0]["id"])
+    point["content"] = "Rewritten point"
+    after_edit = normalize_payload(edited)
+    edit_shown = after_edit["inventory"]["sections"]["experience"]["items"][0][
+        "bullets"
+    ] == ["Rewritten point"]
+
+    # A v5 item that has bullets but no point records adopts them.
+    orphan = json.loads(json.dumps(restored))
+    orphan["inventory"]["sections"]["projects"]["items"].append(
+        {"id": "proj_adopt", "name": "Adopt me", "bullets": ["Kept point"]}
+    )
+    adopted = normalize_payload(orphan)
+    adopted_points = [
+        p["content"] for p in points_for_item(adopted, "projects", "proj_adopt")
+    ]
+    adoption = adopted_points == ["Kept point"]
+
+    kept_generated = all(
+        generated in p["claims"] for p in (restored, after_edit, adopted)
+    )
+    in_step = not any(
+        _copies_out_of_step(p) for p in (restored, after_edit, adopted)
+    )
+    ok = tamper_undone and edit_shown and adoption and kept_generated and in_step
     print(
-        f"v5_points_follow_bullets: {'PASS' if ok else 'FAIL'} "
-        f"(old ids kept={kept_ids}, new point added={added}, "
-        f"other claims kept={kept_generated})"
+        f"v5_bullets_follow_points: {'PASS' if ok else 'FAIL'} "
+        f"(tampering undone={tamper_undone}, point edit shown={edit_shown}, "
+        f"bullets without points adopted={adoption}, "
+        f"other claims kept={kept_generated}, copies match={in_step})"
+    )
+    return ok
+
+
+def test_v5_writers_keep_copies_in_step() -> bool:
+    payload = load_fixture("sample_career.json")
+    problems = []
+
+    def check(label: str, current: dict) -> None:
+        bad = _copies_out_of_step(current)
+        if bad:
+            problems.append(f"{label}: out of step {bad}")
+        if normalize_payload(json.loads(json.dumps(current))) != normalize_payload(
+            normalize_payload(json.loads(json.dumps(current)))
+        ):
+            problems.append(f"{label}: not stable on reload")
+
+    # Mark an existing point so we can see its labels survive later changes.
+    first = points_for_item(payload, "experience", "exp_chaishots")[0]
+    first.update({"status": "supported", "supportedBy": ["fact_lambda"]})
+
+    payload, new_id = add_item(
+        payload,
+        "experience",
+        {"company": "NewCo", "title": "Engineer", "bullets": ["Built A", "Built B"]},
+    )
+    check("add_item", payload)
+    if [p["content"] for p in points_for_item(payload, "experience", new_id)] != [
+        "Built A",
+        "Built B",
+    ]:
+        problems.append("add_item: points not created from supplied bullets")
+
+    payload = update_item(
+        payload, "experience", "exp_chaishots", {"bullets": {"add": ["Added Redis"]}}
+    )
+    check("update add", payload)
+    kept = points_for_item(payload, "experience", "exp_chaishots")[0]
+    if (kept["id"], kept["status"], kept["supportedBy"]) != (
+        first["id"],
+        "supported",
+        ["fact_lambda"],
+    ):
+        problems.append("update add: unchanged point lost its id or labels")
+
+    payload = update_item(
+        payload, "experience", new_id, {"bullets": {"remove": ["Built A"]}}
+    )
+    check("update remove", payload)
+    payload = update_item(
+        payload, "experience", new_id, {"bullets": {"set": ["Only this", "And this"]}}
+    )
+    check("update set", payload)
+    payload = update_item(payload, "experience", new_id, {"bullets": ["Plain list"]})
+    check("update plain list", payload)
+
+    payload = apply_item_enrichment(
+        payload,
+        "experience",
+        "exp_hyrefox",
+        {"bullets": ["Polished ML pipelines"], "skills": ["Python"]},
+    )
+    check("enrichment", payload)
+
+    ops = validate_operations(
+        payload,
+        [
+            {
+                "type": "UPDATE",
+                "target": {"section": "experience", "entityId": "exp_hyrefox"},
+                "changes": {"bullets": {"add": ["Typed request point"]}},
+            }
+        ],
+    )
+    payload, _applied, _diffs = execute_operations(payload, ops)
+    check("typed request", payload)
+
+    payload = archive_item(payload, "experience", new_id)
+    check("archive", payload)
+
+    final = {
+        item["id"]: item["bullets"] for _, item in _point_items(payload)
+    }
+    expected = {
+        "exp_chaishots": ["Built personalization pipeline", "Added Redis"],
+        "exp_hyrefox": ["Polished ML pipelines", "Typed request point"],
+        new_id: ["Plain list"],
+    }
+    if final != expected:
+        problems.append(f"final bullets={final}")
+
+    ok = not problems
+    print(
+        f"v5_writers_keep_copies_in_step: {'PASS' if ok else 'FAIL'} "
+        f"(problems={problems})"
     )
     return ok
 
@@ -278,7 +412,8 @@ def main() -> int:
         test_claim_verification,
         test_v5_upgrade_keeps_points,
         test_v5_upgrade_is_stable,
-        test_v5_points_follow_bullets,
+        test_v5_bullets_follow_points,
+        test_v5_writers_keep_copies_in_step,
         test_v5_blank_record,
         test_v5_label_defaults,
         test_v5_labels_survive_reload,

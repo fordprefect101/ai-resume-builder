@@ -6,9 +6,14 @@ from section_registry import (
     BUILTIN_SECTION_ORDER,
     empty_included_ids,
     empty_sections_bag,
-    get_section_profile,
 )
-from claims import is_point, new_point, point_id, with_point_defaults
+from claims import (
+    clean_point_texts,
+    is_point,
+    rebuild_bullets,
+    reconcile_points,
+    section_has_points,
+)
 from facts import ensure_facts, with_fact_defaults
 
 SCHEMA_VERSION = 5
@@ -27,28 +32,46 @@ def normalize_payload(payload: dict) -> dict:
     return _to_v5(ensure_facts(out))
 
 
-def _story_id(section: str, item_id: str, text: str, occurrence: int) -> str:
-    digest = hashlib.sha1(
-        f"{section}|{item_id}|{occurrence}|{text}".encode()
-    ).hexdigest()
-    return f"story_{digest[:10]}"
+def _legacy_story(section: str, item_id: str, texts: list[str]) -> list[dict]:
+    seen: dict[str, int] = {}
+    story = []
+    for text in texts:
+        occurrence = seen.get(text, 0)
+        seen[text] = occurrence + 1
+        digest = hashlib.sha1(
+            f"{section}|{item_id}|{occurrence}|{text}".encode()
+        ).hexdigest()
+        story.append(
+            {
+                "id": f"story_{digest[:10]}",
+                "text": text,
+                "source": "legacy",
+                "at": None,
+            }
+        )
+    return story
 
 
 def _to_v5(payload: dict) -> dict:
     """
-    Give every bullet-bearing item a story, a writing marker, and point records.
-    Points mirror item.bullets for now; safe to run repeatedly.
+    Give every point-bearing item a story, a writing marker, and point records.
+    Older records: points are built from item.bullets. v5 records: points are the
+    source and item.bullets is rebuilt from them. Safe to run repeatedly.
     """
+    upgrading = payload.get("schemaVersion") != SCHEMA_VERSION
     inventory = dict(payload.get("inventory") or {})
     sections = dict(inventory.get("sections") or {})
     claims = payload.get("claims") or []
-    existing_points = {c.get("id"): c for c in claims if is_point(c)}
+    by_item: dict[tuple, list[dict]] = {}
+    for claim in claims:
+        if is_point(claim):
+            key = (claim.get("section"), claim.get("itemId"))
+            by_item.setdefault(key, []).append(claim)
+    handled: set[tuple] = set()
     points: list[dict] = []
 
     for section, bag in sections.items():
-        if not isinstance(bag, dict):
-            continue
-        if not get_section_profile(section).get("polishBullets"):
+        if not isinstance(bag, dict) or not section_has_points(section):
             continue
         items = []
         for item in bag.get("items") or []:
@@ -56,40 +79,21 @@ def _to_v5(payload: dict) -> dict:
                 items.append(item)
                 continue
             item_id = item["id"]
-            bullets = [
-                b
-                for b in (item.get("bullets") or [])
-                if isinstance(b, str) and b.strip()
-            ]
-
-            seen: dict[str, int] = {}
-            story = []
-            for order, bullet in enumerate(bullets):
-                occurrence = seen.get(bullet, 0)
-                seen[bullet] = occurrence + 1
-                kept = existing_points.get(
-                    point_id(section, item_id, bullet, occurrence)
-                )
-                if kept:
-                    points.append(with_point_defaults({**kept, "order": order}))
-                else:
-                    points.append(
-                        new_point(
-                            section, item_id, bullet, order, occurrence=occurrence
-                        )
-                    )
-                story.append(
-                    {
-                        "id": _story_id(section, item_id, bullet, occurrence),
-                        "text": bullet,
-                        "source": "legacy",
-                        "at": None,
-                    }
-                )
+            existing = sorted(
+                by_item.get((section, item_id), []),
+                key=lambda c: c.get("order", 0),
+            )
+            # A v5 item with bullets but no points yet adopts its bullets.
+            if upgrading or not existing:
+                texts = clean_point_texts(item.get("bullets"))
+            else:
+                texts = clean_point_texts([p.get("content") for p in existing])
+            handled.add((section, item_id))
+            points.extend(reconcile_points(existing, section, item_id, texts))
 
             updated = dict(item)
             if not isinstance(updated.get("story"), list):
-                updated["story"] = story
+                updated["story"] = _legacy_story(section, item_id, texts)
             if not isinstance(updated.get("writing"), dict):
                 updated["writing"] = {
                     "status": "idle",
@@ -100,16 +104,23 @@ def _to_v5(payload: dict) -> dict:
         sections[section] = {**bag, "items": items}
 
     inventory["sections"] = sections
-    return {
-        **payload,
-        "schemaVersion": SCHEMA_VERSION,
-        "inventory": inventory,
-        "facts": [
-            with_fact_defaults(f) if isinstance(f, dict) else f
-            for f in (payload.get("facts") or [])
-        ],
-        "claims": [c for c in claims if not is_point(c)] + points,
-    }
+    kept = [
+        c
+        for c in claims
+        if not is_point(c) or (c.get("section"), c.get("itemId")) not in handled
+    ]
+    return rebuild_bullets(
+        {
+            **payload,
+            "schemaVersion": SCHEMA_VERSION,
+            "inventory": inventory,
+            "facts": [
+                with_fact_defaults(f) if isinstance(f, dict) else f
+                for f in (payload.get("facts") or [])
+            ],
+            "claims": kept + points,
+        }
+    )
 
 
 def _ensure_intake_flags(payload: dict) -> dict:
