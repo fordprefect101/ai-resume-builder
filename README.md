@@ -10,7 +10,7 @@ An **evaluation-driven AI career intelligence system** that converts natural lan
 |-----|---------|
 | [docs/V2.md](./docs/V2.md) | Project direction — structured ops, versioning, provenance, eval |
 | [docs/ORCHESTRATOR.md](./docs/ORCHESTRATOR.md) | Mutation pipeline — tools-only writes, policy |
-| [docs/resume-payload.md](./docs/resume-payload.md) | Resume JSON payload shape (v4) |
+| [docs/resume-payload.md](./docs/resume-payload.md) | Resume JSON payload shape (v5) |
 | [evals/README.md](./evals/README.md) | Evaluation harness |
 
 ## Layout

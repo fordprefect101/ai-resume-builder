@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -540,6 +541,41 @@ def test_single_save_door() -> bool:
     return ok
 
 
+def test_example_record_is_current() -> bool:
+    path = ROOT / "api" / "resume-schema.example.json"
+    example = json.loads(path.read_text())
+    problems = []
+    if example.get("schemaVersion") != 5:
+        problems.append(f"schemaVersion={example.get('schemaVersion')}")
+    if normalize_payload(json.loads(path.read_text())) != example:
+        problems.append("normalizing it changes it; regenerate the file")
+    if _copies_out_of_step(example):
+        problems.append(f"bullets differ from points: {_copies_out_of_step(example)}")
+    ok = not problems
+    print(f"example_record_is_current: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_env_example_lists_settings() -> bool:
+    read_by_code: set[str] = set()
+    for path in (ROOT / "api").glob("*.py"):
+        read_by_code |= set(re.findall(r'os\.getenv\(\s*"([A-Z0-9_]+)"', path.read_text()))
+    listed = set(
+        re.findall(
+            r"^#?\s*([A-Z0-9_]+)=",
+            (ROOT / "api" / ".env.example").read_text(),
+            flags=re.MULTILINE,
+        )
+    )
+    missing = sorted(read_by_code - listed)
+    ok = not missing and len(read_by_code) > 0
+    print(
+        f"env_example_lists_settings: {'PASS' if ok else 'FAIL'} "
+        f"(settings read by code={len(read_by_code)}, missing from example={missing})"
+    )
+    return ok
+
+
 def main() -> int:
     tests = [
         test_entity_resolution,
@@ -555,6 +591,8 @@ def main() -> int:
         test_v5_rejects_unknown_labels,
         test_save_door,
         test_single_save_door,
+        test_example_record_is_current,
+        test_env_example_lists_settings,
     ]
     results = [t() for t in tests]
     passed = sum(results)

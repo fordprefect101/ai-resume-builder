@@ -18,7 +18,7 @@
 
 | Layer | Role |
 |--------|------|
-| **Payload v3** | `inventory` = career truth; `resume` = view (`includedIds`, `sectionOrder`, summary) |
+| **Payload v5** | `inventory` = career truth; `resume` = view (`includedIds`, `sectionOrder`, summary) |
 | **Tools** | Only write path: `add_item`, include/exclude, reorder, `set_skills`, `complete_intake`, … |
 | **Gates** | Basics are UI-only; `intake.basicsVerified` before voice/list tools |
 | **Modes** | Intake vs edit instructions on Realtime / chat |

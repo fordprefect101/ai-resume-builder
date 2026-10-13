@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "intake": {
     "status": "complete",
     "basicsVerified": true,
@@ -14,11 +14,21 @@
       "phone": "+1 555 0100",
       "location": "London, UK",
       "links": [
-        { "label": "LinkedIn", "url": "https://linkedin.com/in/ada" },
-        { "label": "GitHub", "url": "https://github.com/ada" }
+        {
+          "label": "LinkedIn",
+          "url": "https://linkedin.com/in/ada"
+        },
+        {
+          "label": "GitHub",
+          "url": "https://github.com/ada"
+        }
       ]
     },
-    "skills": ["Python", "FastAPI", "PostgreSQL"],
+    "skills": [
+      "Python",
+      "FastAPI",
+      "PostgreSQL"
+    ],
     "sections": {
       "experience": {
         "title": "Experience",
@@ -33,9 +43,28 @@
             "bullets": [
               "Built an internal API used by the product team daily."
             ],
-            "categories": ["software-engineering", "backend"],
-            "skills": ["Python", "PostgreSQL"],
-            "status": "active"
+            "categories": [
+              "software-engineering",
+              "backend"
+            ],
+            "skills": [
+              "Python",
+              "PostgreSQL"
+            ],
+            "status": "active",
+            "story": [
+              {
+                "id": "story_d155185d00",
+                "text": "Built an internal API used by the product team daily.",
+                "source": "legacy",
+                "at": null
+              }
+            ],
+            "writing": {
+              "status": "idle",
+              "questions": [],
+              "followUpsAsked": 0
+            }
           }
         ]
       },
@@ -46,14 +75,36 @@
             "id": "proj_music",
             "name": "Music Transcription Tool",
             "description": "Converts audio clips into readable note sequences.",
-            "technologies": ["Python", "FastAPI"],
+            "technologies": [
+              "Python",
+              "FastAPI"
+            ],
             "bullets": [
               "Built an end-to-end pipeline for processing 30-second clips."
             ],
             "url": "",
-            "categories": ["audio", "side-project"],
-            "skills": ["Python", "FastAPI"],
-            "status": "active"
+            "categories": [
+              "audio",
+              "side-project"
+            ],
+            "skills": [
+              "Python",
+              "FastAPI"
+            ],
+            "status": "active",
+            "story": [
+              {
+                "id": "story_cbf00c2c8b",
+                "text": "Built an end-to-end pipeline for processing 30-second clips.",
+                "source": "legacy",
+                "at": null
+              }
+            ],
+            "writing": {
+              "status": "idle",
+              "questions": [],
+              "followUpsAsked": 0
+            }
           }
         ]
       },
@@ -90,11 +141,50 @@
     "title": "General Resume",
     "summary": "Engineer focused on practical systems and clear communication.",
     "includedIds": {
-      "experience": ["exp_chaishots"],
-      "projects": ["proj_music"],
-      "education": ["edu_uni"],
-      "achievements": ["ach_1"]
+      "experience": [
+        "exp_chaishots"
+      ],
+      "projects": [
+        "proj_music"
+      ],
+      "education": [
+        "edu_uni"
+      ],
+      "achievements": [
+        "ach_1"
+      ]
     },
-    "sectionOrder": ["experience", "projects", "education", "achievements"]
-  }
+    "sectionOrder": [
+      "experience",
+      "projects",
+      "education",
+      "achievements"
+    ]
+  },
+  "facts": [],
+  "claims": [
+    {
+      "id": "pt_d155185d00",
+      "content": "Built an internal API used by the product team daily.",
+      "supportedBy": [],
+      "section": "experience",
+      "itemId": "exp_chaishots",
+      "order": 0,
+      "status": "unchecked",
+      "issues": [],
+      "origin": "legacy"
+    },
+    {
+      "id": "pt_cbf00c2c8b",
+      "content": "Built an end-to-end pipeline for processing 30-second clips.",
+      "supportedBy": [],
+      "section": "projects",
+      "itemId": "proj_music",
+      "order": 0,
+      "status": "unchecked",
+      "issues": [],
+      "origin": "legacy"
+    }
+  ],
+  "variants": {}
 }

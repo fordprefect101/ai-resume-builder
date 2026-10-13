@@ -1,4 +1,4 @@
-"""Generic resume list-section mutations (schemaVersion 3)."""
+"""Generic resume list-section mutations (schemaVersion 5)."""
 
 from datetime import datetime, timezone
 import uuid
@@ -258,7 +258,7 @@ def _sections(payload: dict) -> dict:
     inventory = payload.get("inventory") or {}
     sections = inventory.get("sections")
     if not isinstance(sections, dict) or not sections:
-        raise ValueError("payload has no inventory.sections (normalize to v3 first)")
+        raise ValueError("payload has no inventory.sections (normalize first)")
     return sections
 
 
