@@ -8,8 +8,8 @@ from section_registry import (
     empty_sections_bag,
     get_section_profile,
 )
-from claims import is_point, new_point, point_id
-from facts import ensure_facts
+from claims import is_point, new_point, point_id, with_point_defaults
+from facts import ensure_facts, with_fact_defaults
 
 SCHEMA_VERSION = 5
 
@@ -71,7 +71,7 @@ def _to_v5(payload: dict) -> dict:
                     point_id(section, item_id, bullet, occurrence)
                 )
                 if kept:
-                    points.append({**kept, "order": order})
+                    points.append(with_point_defaults({**kept, "order": order}))
                 else:
                     points.append(
                         new_point(
@@ -104,6 +104,10 @@ def _to_v5(payload: dict) -> dict:
         **payload,
         "schemaVersion": SCHEMA_VERSION,
         "inventory": inventory,
+        "facts": [
+            with_fact_defaults(f) if isinstance(f, dict) else f
+            for f in (payload.get("facts") or [])
+        ],
         "claims": [c for c in claims if not is_point(c)] + points,
     }
 

@@ -7,8 +7,24 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+FACT_KINDS = ("context", "action", "tool", "result", "scale", "unsorted")
+FACT_OWNERS = ("me", "team", "unclear")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def with_fact_defaults(fact: dict) -> dict:
+    """Fill v5 labels on an older fact without guessing: only tech facts get a kind."""
+    field = (fact.get("context") or {}).get("field")
+    defaults = {
+        "kind": "tool" if field == "technologies" else "unsorted",
+        "owner": "unclear",
+        "quote": None,
+        "storyId": None,
+    }
+    return {**fact, **{k: v for k, v in defaults.items() if k not in fact}}
 
 
 def ensure_facts(payload: dict) -> dict:
@@ -33,7 +49,15 @@ def add_fact(
     item_id: str | None = None,
     field: str | None = None,
     source: str = "user",
+    kind: str = "unsorted",
+    owner: str = "unclear",
+    quote: str | None = None,
+    story_id: str | None = None,
 ) -> dict:
+    if kind not in FACT_KINDS:
+        raise ValueError(f"unknown fact kind: {kind}")
+    if owner not in FACT_OWNERS:
+        raise ValueError(f"unknown fact owner: {owner}")
     payload = ensure_facts(payload)
     text = str(content or "").strip()
     if not text:
@@ -56,6 +80,10 @@ def add_fact(
             },
             "source": source,
             "createdAt": _now(),
+            "kind": kind,
+            "owner": owner,
+            "quote": quote,
+            "storyId": story_id,
         }
     )
     return {**payload, "facts": facts}
@@ -94,6 +122,7 @@ def sync_facts_from_item(payload: dict, section: str, item: dict) -> dict:
                 item_id=item_id,
                 field="technologies",
                 source="user",
+                kind="tool",
             )
     return payload
 

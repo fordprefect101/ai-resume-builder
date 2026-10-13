@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 
 from facts import fact_by_id
 
+POINT_STATUSES = ("unchecked", "supported", "needs_review", "user_edited")
+POINT_ORIGINS = ("legacy", "ai", "user", "imported")
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -25,6 +28,12 @@ def point_id(section: str, item_id: str, content: str, occurrence: int = 0) -> s
     return f"pt_{digest[:10]}"
 
 
+def with_point_defaults(point: dict) -> dict:
+    """Fill v5 labels on an older point; values already set are kept."""
+    defaults = {"status": "unchecked", "issues": [], "origin": "legacy"}
+    return {**point, **{k: v for k, v in defaults.items() if k not in point}}
+
+
 def new_point(
     section: str,
     item_id: str,
@@ -32,8 +41,14 @@ def new_point(
     order: int,
     *,
     occurrence: int = 0,
+    status: str = "unchecked",
+    origin: str = "legacy",
 ) -> dict:
     """A point is a claim tied to one inventory item (a resume bullet)."""
+    if status not in POINT_STATUSES:
+        raise ValueError(f"unknown point status: {status}")
+    if origin not in POINT_ORIGINS:
+        raise ValueError(f"unknown point origin: {origin}")
     return {
         "id": point_id(section, item_id, content, occurrence),
         "content": content,
@@ -41,6 +56,9 @@ def new_point(
         "section": section,
         "itemId": item_id,
         "order": order,
+        "status": status,
+        "issues": [],
+        "origin": origin,
     }
 
 

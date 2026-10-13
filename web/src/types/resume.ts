@@ -3,6 +3,10 @@ export type CareerFact = {
   content: string
   context?: { section?: string; itemId?: string; field?: string }
   source?: string
+  kind?: string
+  owner?: string
+  quote?: string | null
+  storyId?: string | null
 }
 
 export type DerivedClaim = {
@@ -14,6 +18,8 @@ export type DerivedClaim = {
   section?: string
   itemId?: string
   order?: number
+  issues?: unknown[]
+  origin?: string
 }
 
 export type StoryChunk = {
