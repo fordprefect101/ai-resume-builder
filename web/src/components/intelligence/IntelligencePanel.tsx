@@ -125,6 +125,8 @@ export function IntelligencePanel({
   }
 
   const variants = Object.values(payload.variants ?? {})
+  // Item points also live in claims (v5); this list is only for generated ones.
+  const generatedClaims = (payload.claims ?? []).filter((c) => !c.itemId)
 
   return (
     <section className="intelligence-panel">
@@ -230,11 +232,11 @@ export function IntelligencePanel({
         </div>
       )}
 
-      {(payload.claims ?? []).length > 0 && (
+      {generatedClaims.length > 0 && (
         <details className="intel-section">
           <summary>Generated claims &amp; provenance</summary>
           <ul className="claim-list">
-            {(payload.claims ?? []).map((c) => (
+            {generatedClaims.map((c) => (
               <li key={c.id}>
                 <p>{c.content}</p>
                 <small>Status: {c.status ?? 'pending'}</small>

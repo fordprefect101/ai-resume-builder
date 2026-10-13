@@ -11,6 +11,22 @@ export type DerivedClaim = {
   supportedBy: string[]
   variantId?: string
   status?: string
+  section?: string
+  itemId?: string
+  order?: number
+}
+
+export type StoryChunk = {
+  id: string
+  text: string
+  source: string
+  at: string | null
+}
+
+export type WritingState = {
+  status: string
+  questions: unknown[]
+  followUpsAsked: number
 }
 
 export type ResumeVariant = {
@@ -25,6 +41,8 @@ export type ResumeVariant = {
 export type ResumeItem = {
   id: string
   status?: string
+  story?: StoryChunk[]
+  writing?: WritingState
   [key: string]: unknown
 }
 
@@ -34,7 +52,7 @@ export type ResumeSection = {
 }
 
 export type ResumePayload = {
-  schemaVersion: 3 | 4
+  schemaVersion: 3 | 4 | 5
   intake?: {
     status?: string
     basicsVerified?: boolean
@@ -67,7 +85,9 @@ export function isResumePayload(value: unknown): value is ResumePayload {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<ResumePayload>
   return Boolean(
-    (payload.schemaVersion === 3 || payload.schemaVersion === 4) &&
+    (payload.schemaVersion === 3 ||
+      payload.schemaVersion === 4 ||
+      payload.schemaVersion === 5) &&
       payload.inventory?.basics &&
       payload.inventory?.sections &&
       payload.resume?.includedIds &&

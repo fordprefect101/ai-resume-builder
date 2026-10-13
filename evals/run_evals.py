@@ -12,14 +12,26 @@ sys.path.insert(0, str(ROOT / "api"))
 
 from context_selector import select_resume_context
 from claim_verify import verify_claim
+from claims import points_for_item
 from payload_normalize import normalize_payload
 from op_validator import validate_operations
 from op_executor import execute_operations
 
 
-def load_fixture(name: str) -> dict:
+def load_raw_fixture(name: str) -> dict:
     path = ROOT / "evals" / "fixtures" / name
-    return normalize_payload(json.loads(path.read_text()))
+    return json.loads(path.read_text())
+
+
+def load_fixture(name: str) -> dict:
+    return normalize_payload(load_raw_fixture(name))
+
+
+def _point_items(payload: dict):
+    sections = payload["inventory"]["sections"]
+    for section in ("experience", "projects"):
+        for item in sections[section]["items"]:
+            yield section, item
 
 
 def test_entity_resolution() -> bool:
@@ -60,8 +72,103 @@ def test_claim_verification() -> bool:
     return ok
 
 
+def test_v5_upgrade_keeps_points() -> bool:
+    raw = load_raw_fixture("sample_career.json")
+    payload = normalize_payload(raw)
+    problems = []
+    if raw.get("schemaVersion") != 4:
+        problems.append("fixture is no longer a v4 record")
+    if payload.get("schemaVersion") != 5:
+        problems.append(f"schemaVersion={payload.get('schemaVersion')}")
+    raw_items = dict(
+        (item["id"], item)
+        for _, item in _point_items(raw)
+    )
+    checked = 0
+    for section, item in _point_items(payload):
+        before = raw_items[item["id"]]["bullets"]
+        checked += len(before)
+        if item.get("bullets") != before:
+            problems.append(f"{item['id']}: bullets changed")
+        points = [p["content"] for p in points_for_item(payload, section, item["id"])]
+        if points != before:
+            problems.append(f"{item['id']}: points={points}")
+        story = item.get("story") or []
+        if [s["text"] for s in story] != before or any(
+            s["source"] != "legacy" for s in story
+        ):
+            problems.append(f"{item['id']}: story={story}")
+        if (item.get("writing") or {}).get("status") != "idle":
+            problems.append(f"{item['id']}: writing={item.get('writing')}")
+    ok = not problems and checked > 0
+    print(
+        f"v5_upgrade_keeps_points: {'PASS' if ok else 'FAIL'} "
+        f"(points checked={checked}, problems={problems})"
+    )
+    return ok
+
+
+def test_v5_upgrade_is_stable() -> bool:
+    raw = load_raw_fixture("sample_career.json")
+    once = normalize_payload(raw)
+    again = normalize_payload(load_raw_fixture("sample_career.json"))
+    twice = normalize_payload(once)
+    same_ids = once == again
+    settled = once == twice
+    ok = same_ids and settled
+    print(
+        f"v5_upgrade_is_stable: {'PASS' if ok else 'FAIL'} "
+        f"(same result each time={same_ids}, no change when repeated={settled})"
+    )
+    return ok
+
+
+def test_v5_points_follow_bullets() -> bool:
+    payload = load_fixture("sample_career.json")
+    before = {p["content"]: p["id"] for p in payload["claims"] if p.get("itemId")}
+    generated = {"id": "claim_keepme", "content": "Generated", "supportedBy": []}
+    payload["claims"] = [generated] + payload["claims"]
+    item = payload["inventory"]["sections"]["experience"]["items"][0]
+    item["bullets"] = item["bullets"] + ["Added Redis caching"]
+    after = normalize_payload(payload)
+    after_points = {p["content"]: p["id"] for p in after["claims"] if p.get("itemId")}
+    kept_ids = all(after_points.get(text) == pid for text, pid in before.items())
+    added = "Added Redis caching" in after_points
+    kept_generated = generated in after["claims"]
+    ok = kept_ids and added and kept_generated
+    print(
+        f"v5_points_follow_bullets: {'PASS' if ok else 'FAIL'} "
+        f"(old ids kept={kept_ids}, new point added={added}, "
+        f"other claims kept={kept_generated})"
+    )
+    return ok
+
+
+def test_v5_blank_record() -> bool:
+    problems = []
+    for label, source in (("empty", {}), ("not a record", None)):
+        blank = normalize_payload(source)
+        if blank.get("schemaVersion") != 5:
+            problems.append(f"{label}: schemaVersion={blank.get('schemaVersion')}")
+        if blank.get("claims") != [] or blank.get("facts") != []:
+            problems.append(f"{label}: claims/facts not empty")
+        if any(True for _ in _point_items(blank)):
+            problems.append(f"{label}: has items")
+    ok = not problems
+    print(f"v5_blank_record: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
 def main() -> int:
-    tests = [test_entity_resolution, test_skill_delete_op, test_claim_verification]
+    tests = [
+        test_entity_resolution,
+        test_skill_delete_op,
+        test_claim_verification,
+        test_v5_upgrade_keeps_points,
+        test_v5_upgrade_is_stable,
+        test_v5_points_follow_bullets,
+        test_v5_blank_record,
+    ]
     results = [t() for t in tests]
     passed = sum(results)
     print(f"\n{passed}/{len(tests)} eval cases passed")

@@ -1,26 +1,111 @@
-"""Normalize older payloads to schemaVersion 3/4 (sections + includedIds maps)."""
+"""Normalize older payloads to schemaVersion 5 (sections + includedIds maps, story + points)."""
+
+import hashlib
 
 from section_registry import (
     BUILTIN_SECTION_ORDER,
     empty_included_ids,
     empty_sections_bag,
+    get_section_profile,
 )
+from claims import is_point, new_point, point_id
 from facts import ensure_facts
+
+SCHEMA_VERSION = 5
 
 
 def normalize_payload(payload: dict) -> dict:
     if not isinstance(payload, dict):
-        return _blank_v4()
+        return _blank_v5()
 
-    if payload.get("schemaVersion") in (3, 4) and isinstance(
+    if payload.get("schemaVersion") in (3, 4, 5) and isinstance(
         (payload.get("inventory") or {}).get("sections"), dict
     ):
         out = _ensure_intake_flags(payload)
-        if out.get("schemaVersion") != 4:
-            out = {**out, "schemaVersion": 4}
-        return ensure_facts(out)
+    else:
+        out = _ensure_intake_flags(_v2_to_v4(payload))
+    return _to_v5(ensure_facts(out))
 
-    return ensure_facts(_ensure_intake_flags(_v2_to_v4(payload)))
+
+def _story_id(section: str, item_id: str, text: str, occurrence: int) -> str:
+    digest = hashlib.sha1(
+        f"{section}|{item_id}|{occurrence}|{text}".encode()
+    ).hexdigest()
+    return f"story_{digest[:10]}"
+
+
+def _to_v5(payload: dict) -> dict:
+    """
+    Give every bullet-bearing item a story, a writing marker, and point records.
+    Points mirror item.bullets for now; safe to run repeatedly.
+    """
+    inventory = dict(payload.get("inventory") or {})
+    sections = dict(inventory.get("sections") or {})
+    claims = payload.get("claims") or []
+    existing_points = {c.get("id"): c for c in claims if is_point(c)}
+    points: list[dict] = []
+
+    for section, bag in sections.items():
+        if not isinstance(bag, dict):
+            continue
+        if not get_section_profile(section).get("polishBullets"):
+            continue
+        items = []
+        for item in bag.get("items") or []:
+            if not isinstance(item, dict) or not item.get("id"):
+                items.append(item)
+                continue
+            item_id = item["id"]
+            bullets = [
+                b
+                for b in (item.get("bullets") or [])
+                if isinstance(b, str) and b.strip()
+            ]
+
+            seen: dict[str, int] = {}
+            story = []
+            for order, bullet in enumerate(bullets):
+                occurrence = seen.get(bullet, 0)
+                seen[bullet] = occurrence + 1
+                kept = existing_points.get(
+                    point_id(section, item_id, bullet, occurrence)
+                )
+                if kept:
+                    points.append({**kept, "order": order})
+                else:
+                    points.append(
+                        new_point(
+                            section, item_id, bullet, order, occurrence=occurrence
+                        )
+                    )
+                story.append(
+                    {
+                        "id": _story_id(section, item_id, bullet, occurrence),
+                        "text": bullet,
+                        "source": "legacy",
+                        "at": None,
+                    }
+                )
+
+            updated = dict(item)
+            if not isinstance(updated.get("story"), list):
+                updated["story"] = story
+            if not isinstance(updated.get("writing"), dict):
+                updated["writing"] = {
+                    "status": "idle",
+                    "questions": [],
+                    "followUpsAsked": 0,
+                }
+            items.append(updated)
+        sections[section] = {**bag, "items": items}
+
+    inventory["sections"] = sections
+    return {
+        **payload,
+        "schemaVersion": SCHEMA_VERSION,
+        "inventory": inventory,
+        "claims": [c for c in claims if not is_point(c)] + points,
+    }
 
 
 def _ensure_intake_flags(payload: dict) -> dict:
@@ -34,10 +119,8 @@ def _ensure_intake_flags(payload: dict) -> dict:
     return next_payload
 
 
-def _blank_v4() -> dict:
-    base = _blank_v3()
-    base["schemaVersion"] = 4
-    return ensure_facts(base)
+def _blank_v5() -> dict:
+    return _to_v5(ensure_facts(_blank_v3()))
 
 
 def _blank_v3() -> dict:
