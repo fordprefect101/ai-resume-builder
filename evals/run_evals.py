@@ -698,6 +698,171 @@ def test_timing_log() -> bool:
     return ok
 
 
+def _resume_with_jobs(jobs: int, points_each: int) -> dict:
+    """A realistic-size resume: `jobs` experience entries of `points_each` long points."""
+    raw = load_raw_fixture("sample_career.json")
+    items = [
+        {
+            "id": f"exp_{n}",
+            "company": f"Company {n}",
+            "title": "Software Engineer",
+            "startDate": "2023-01",
+            "endDate": "2024-01",
+            "location": "Bengaluru",
+            "bullets": [
+                f"Built and shipped feature {n}-{k} using Python, Redis and AWS Lambda, "
+                "cutting response time for the recommendations service noticeably"
+                for k in range(points_each)
+            ],
+            "categories": ["backend"],
+            "skills": ["Python", "Redis"],
+            "status": "active",
+        }
+        for n in range(jobs)
+    ]
+    raw["inventory"]["sections"]["experience"]["items"] = items
+    raw["resume"]["includedIds"]["experience"] = [i["id"] for i in items]
+    raw["facts"] = []
+    # Voice setup is in progress, with skills already confirmed.
+    raw["intake"] = {
+        "status": "in_progress",
+        "basicsVerified": True,
+        "skillsConfirmed": True,
+    }
+    return normalize_payload(raw)
+
+
+def _voice_replies(payload: dict) -> dict[str, dict]:
+    """Run the voice actions through the real server code on a stand-in database."""
+    import main
+
+    saved_connect, saved_user = main.psycopg.connect, main.get_current_user
+    replies: dict[str, dict] = {}
+    try:
+        main.get_current_user = lambda request: None
+        calls = {
+            "add_item": lambda: main.tool_add_item(
+                "s",
+                main.AddItemBody(
+                    section="experience",
+                    fields={
+                        "company": "NewCo",
+                        "title": "Engineer",
+                        "location": "Remote",
+                        "startDate": "2025-01",
+                        "endDate": "2025-12",
+                        "bullets": ["Built it"],
+                    },
+                    enrich=False,
+                ),
+                request=None,
+            ),
+            "complete_intake": lambda: main.tool_complete_intake(
+                "s",
+                main.CompleteIntakeBody(
+                    confirmedSkippedSections=["projects", "education", "achievements"]
+                ),
+                request=None,
+            ),
+            "set_skills": lambda: main.tool_set_skills(
+                "s", main.SetSkillsBody(skills=["Python", "Redis"]), request=None
+            ),
+            "exclude_from_resume": lambda: main.tool_exclude_from_resume(
+                "s", main.SectionItemBody(section="experience", itemId="exp_0"), request=None
+            ),
+            "include_on_resume": lambda: main.tool_include_on_resume(
+                "s", main.SectionItemBody(section="experience", itemId="exp_0"), request=None
+            ),
+            "reorder_sections": lambda: main.tool_reorder_sections(
+                "s",
+                main.ReorderSectionsBody(
+                    sectionOrder=["projects", "experience", "education", "achievements"]
+                ),
+                request=None,
+            ),
+            "reorder_items": lambda: main.tool_reorder_items(
+                "s",
+                main.ReorderItemsBody(
+                    section="experience",
+                    itemIds=[i["id"] for i in payload["inventory"]["sections"]["experience"]["items"]][::-1],
+                ),
+                request=None,
+            ),
+            "search_resume_context": lambda: main.tool_search_context(
+                "s", main.SearchContextBody(query="Company 1 Software Engineer"), request=None
+            ),
+        }
+        for name, call in calls.items():
+            main.psycopg.connect = lambda *a, **k: _FakeConnection(json.loads(json.dumps(payload)))
+            replies[name] = call()
+    finally:
+        main.psycopg.connect, main.get_current_user = saved_connect, saved_user
+    return replies
+
+
+def test_assistant_result_is_small_and_constant() -> bool:
+    import assistant_result
+
+    problems = []
+    small = _voice_replies(_resume_with_jobs(2, 2))
+    large = _voice_replies(_resume_with_jobs(20, 5))
+    expected_tools = {
+        "add_item", "set_skills", "complete_intake", "exclude_from_resume", "include_on_resume",
+        "reorder_sections", "reorder_items", "search_resume_context",
+    }
+    if set(small) != expected_tools:
+        problems.append(f"actions covered={sorted(small)}")
+
+    sizes = {}
+    for name in sorted(expected_tools):
+        a, b = small[name].get("assistantResult"), large[name].get("assistantResult")
+        if not a or not b:
+            problems.append(f"{name}: no assistantResult")
+            continue
+        for label, result in (("small", a), ("large", b)):
+            if result.get("ok") is not True or result.get("tool") != name:
+                problems.append(f"{name} ({label}): ok/tool fields wrong")
+            if len(result.get("message", "")) > assistant_result.MESSAGE_CAP:
+                problems.append(f"{name} ({label}): message too long")
+            if "progress" not in result or "payload" in result or "inventory" in result:
+                problems.append(f"{name} ({label}): progress missing or record leaked")
+        size_a, size_b = len(json.dumps(a)), len(json.dumps(b))
+        full_b = len(json.dumps(large[name]))
+        sizes[name] = (size_a, size_b, full_b)
+        # Actions report counts, so the 20-job result may differ only by a few digits.
+        # Search returns up to CANDIDATE_CAP matches, so it is bounded, not identical.
+        if name != "search_resume_context" and size_b > size_a + 40:
+            problems.append(f"{name}: grew {size_a} -> {size_b} characters")
+        if size_b > 1800:
+            problems.append(f"{name}: {size_b} characters is too large")
+        if name != "search_resume_context" and size_b * 4 > full_b:
+            problems.append(f"{name}: short result {size_b} is not much smaller than full reply {full_b}")
+
+    search = large["search_resume_context"]["assistantResult"]
+    if len(search.get("candidates", [])) > assistant_result.CANDIDATE_CAP:
+        problems.append("search: too many candidates")
+    if search.get("candidates") and not all(c.get("itemId") and c.get("section") for c in search["candidates"]):
+        problems.append("search: candidates missing itemId/section")
+    if not isinstance(search.get("ambiguous"), bool):
+        problems.append("search: ambiguous flag missing")
+    added = large["add_item"]["assistantResult"]
+    if not added.get("itemId") or added.get("section") != "experience":
+        problems.append("add_item: itemId/section not reported")
+
+    failed = assistant_result.failure("add_item", "x" * 500)
+    if failed.get("ok") is not False or len(failed["error"]) > assistant_result.MESSAGE_CAP:
+        problems.append("failure result malformed")
+
+    ok = not problems
+    biggest = max((b for _, b, _ in sizes.values()), default=0)
+    print(
+        f"assistant_result_is_small_and_constant: {'PASS' if ok else 'FAIL'} "
+        f"(largest short result={biggest} characters, "
+        f"add_item full reply on 20 jobs={sizes.get('add_item', (0, 0, 0))[2]}, problems={problems})"
+    )
+    return ok
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -781,6 +946,7 @@ def main() -> int:
         test_v5_rejects_unknown_labels,
         test_save_door,
         test_voice_add_entry_end_to_end,
+        test_assistant_result_is_small_and_constant,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,

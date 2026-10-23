@@ -43,6 +43,7 @@ the stored record. It also confirms the server can start on an empty database.
 | `v5_rejects_unknown_labels` | Unknown fact kinds/owners and point statuses/origins are refused |
 | `save_door` | `_save_payload` normalizes, keeps an undo copy, and records a version entry |
 | `voice_add_entry_end_to_end` | The voice add-entry request runs through the real code (stand-in database and OpenAI) and saves the entry |
+| `assistant_result_is_small_and_constant` | The 8 voice actions return a short `assistantResult` with the agreed fields; its size does not grow from a 2-job to a 20-job resume (search is capped) |
 | `single_save_door` | No code outside `_save_payload` / `_create_snapshot` writes a stored resume |
 | `example_record_is_current` | `api/resume-schema.example.json` is a valid, normalized v5 record |
 | `env_example_lists_settings` | `api/.env.example` names every setting the API code reads |

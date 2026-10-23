@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+import assistant_result
 from auth import ensure_auth_schema, get_current_user, load_snapshot, user_resume_session
 from auth_routes import router as auth_router
 from chat import run_chat
@@ -363,6 +364,7 @@ def tool_search_context(session_id: str, body: SearchContextBody, request: Reque
         "appliedTool": "search_resume_context",
         "mutated": False,
         "context": context,
+        "assistantResult": assistant_result.from_search(payload, context),
     }
 
 
@@ -437,6 +439,11 @@ def tool_set_skills(session_id: str, body: SetSkillsBody, request: Request):
         "version": saved[2],
         "appliedTool": "set_skills",
         "intakeContext": intake_context(saved[1]),
+        "assistantResult": assistant_result.build(
+            "set_skills",
+            saved[1],
+            message=f"Saved {len(body.skills)} skills.",
+        ),
     }
 
 
@@ -470,6 +477,9 @@ def tool_complete_intake(session_id: str, body: CompleteIntakeBody, request: Req
         "appliedTool": "complete_intake",
         "mode": "edit",
         "intakeContext": intake_context(saved[1]),
+        "assistantResult": assistant_result.build(
+            "complete_intake", saved[1], message="Setup is complete."
+        ),
     }
 
 
@@ -510,6 +520,13 @@ def tool_exclude_from_resume(session_id: str, body: SectionItemBody, request: Re
         "appliedTool": "exclude_from_resume",
         "section": body.section,
         "itemId": body.itemId,
+        "assistantResult": assistant_result.build(
+            "exclude_from_resume",
+            saved[1],
+            message="Hid the entry from the resume.",
+            section=body.section,
+            item_id=body.itemId,
+        ),
     }
 
 
@@ -550,6 +567,13 @@ def tool_include_on_resume(session_id: str, body: SectionItemBody, request: Requ
         "appliedTool": "include_on_resume",
         "section": body.section,
         "itemId": body.itemId,
+        "assistantResult": assistant_result.build(
+            "include_on_resume",
+            saved[1],
+            message="Showed the entry on the resume.",
+            section=body.section,
+            item_id=body.itemId,
+        ),
     }
 
 
@@ -610,6 +634,13 @@ def tool_add_item(session_id: str, body: AddItemBody, request: Request):
         "section": body.section,
         "itemId": new_id,
         "intakeContext": intake_context(saved[1]),
+        "assistantResult": assistant_result.build(
+            "add_item",
+            saved[1],
+            message=f"Added an entry to {body.section}.",
+            section=body.section,
+            item_id=new_id,
+        ),
     }
 
 
@@ -642,6 +673,9 @@ def tool_reorder_sections(session_id: str, body: ReorderSectionsBody, request: R
         "version": saved[2],
         "appliedTool": "reorder_sections",
         "sectionOrder": new_payload["resume"]["sectionOrder"],
+        "assistantResult": assistant_result.build(
+            "reorder_sections", saved[1], message="Reordered the sections."
+        ),
     }
 
 
@@ -678,6 +712,12 @@ def tool_reorder_items(session_id: str, body: ReorderItemsBody, request: Request
             item.get("id")
             for item in new_payload["inventory"]["sections"][body.section]["items"]
         ],
+        "assistantResult": assistant_result.build(
+            "reorder_items",
+            saved[1],
+            message=f"Reordered the entries in {body.section}.",
+            section=body.section,
+        ),
     }
 
 

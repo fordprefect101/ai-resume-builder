@@ -156,6 +156,26 @@ export type ToolTiming = {
   ok: boolean
 }
 
+/**
+ * What the voice model is sent after a tool runs. The full server reply (the whole
+ * resume) goes to the screen only; the model gets the short `assistantResult`
+ * because everything sent into a call stays in its memory.
+ */
+export function resultForAssistant(output: unknown): Record<string, unknown> {
+  if (output && typeof output === 'object') {
+    const record = output as Record<string, unknown>
+    if (typeof record.error === 'string') {
+      return { ok: false, error: record.error.slice(0, 200) }
+    }
+    const short = record.assistantResult
+    if (short && typeof short === 'object') {
+      return short as Record<string, unknown>
+    }
+  }
+  // Never fall back to the full reply: a minimal acknowledgement is always safe.
+  return { ok: true }
+}
+
 export async function handleToolCallEvent(
   dc: RTCDataChannel,
   sessionId: string,
@@ -183,7 +203,7 @@ export async function handleToolCallEvent(
   onResult?.(output)
 
   // What the voice model will read: everything in outputText stays in the call.
-  const outputText = JSON.stringify(output)
+  const outputText = JSON.stringify(resultForAssistant(output))
   const timing: ToolTiming = {
     name: call.name,
     ms: Math.round(performance.now() - started),

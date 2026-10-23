@@ -35,6 +35,39 @@ The timing log stores the route template (for example `/resume/{session_id}/tool
 
 Use the same script, the same kind of content and the same network each time; otherwise the numbers are not comparable.
 
+## The short result the assistant receives (step 1b.2)
+
+Everything sent into a voice call stays in its memory, so after each action the browser
+sends the model only `assistantResult` from the server's reply. The full reply (the whole
+resume) goes to the screen only. Built in `api/assistant_result.py`; applied by
+`resultForAssistant` in `web/src/voice/handleRealtimeTools.ts`. If a reply has no
+`assistantResult`, the model gets `{"ok": true}`, never the full reply. Errors become
+`{"ok": false, "error": "..."}`.
+
+| Field | Meaning |
+|---|---|
+| `ok` | The action worked |
+| `tool` | The action's name |
+| `message` | One plain sentence, at most 200 characters |
+| `section`, `itemId` | The section and entry touched or created, when there is one |
+| `progress` | `setupComplete`, `detailsConfirmed`, `skills` (a count) and `sections` (a count per section). Counts only, never lists of ids |
+| `candidates`, `ambiguous` | Search only: at most 6 short matches (section, itemId, onResume and a label), and whether several match about equally |
+| `error` | Failures only |
+
+Actions covered: add_item, set_skills, complete_intake, exclude_from_resume,
+include_on_resume, reorder_sections, reorder_items, search_resume_context.
+
+Measured on generated resumes through the real server code (characters):
+
+| Resume | add_item full reply | add_item short result | search short result |
+|---|---|---|---|
+| 2 jobs x 2 points | 5,873 | 285 | 514 |
+| 8 jobs x 5 points | 30,827 | 285 | 986 |
+| 20 jobs x 5 points | 73,321 | 286 | 995 |
+
+Action results stay the same size whatever the resume size; search is bounded by its 6-match cap.
+Not covered yet: the typed-chat path still returns bulky results to its model.
+
 ## Recorded baselines
 
 ### 2026-10-14: size of what the voice model reads after one save (measured in code, no live session)
