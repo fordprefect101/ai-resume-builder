@@ -35,14 +35,22 @@ Text (or voice→STT) → LLM proposes CareerOperations
 ## Run locally
 
 ```bash
-# API (requires Postgres + OPENAI_API_KEY)
+# Database (Postgres 16 in Docker, data kept in the resume-builder-db-data volume)
+docker compose up -d
+
+# API (needs the database and OPENAI_API_KEY in api/.env; see api/.env.example)
+# Creates any missing tables on startup.
 cd api && uvicorn main:app --reload --port 8081
 
 # Frontend
 cd web && npm run dev
 
-# Evals (no API key)
+# Evals (no database or API key needed)
 python evals/run_evals.py
+
+# Walkthrough against a real, separate test database (needs the database running;
+# --no-ai skips the two paid AI calls)
+python evals/db_walkthrough.py --no-ai
 ```
 
 ## Key API endpoints

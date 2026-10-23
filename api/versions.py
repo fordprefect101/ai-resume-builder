@@ -19,14 +19,25 @@ def _db_url() -> str:
     return url
 
 
-def ensure_v2_schema() -> None:
-    sql = (Path(__file__).parent / "db" / "v2.sql").read_text()
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
+def _run_sql_files(*names: str) -> None:
+    """Run db/<name> files in order. They only create what is missing."""
     with psycopg.connect(_db_url()) as conn:
         with conn.cursor() as cur:
-            for stmt in statements:
-                cur.execute(stmt)
+            for name in names:
+                sql = (Path(__file__).parent / "db" / name).read_text()
+                for stmt in (s.strip() for s in sql.split(";")):
+                    if stmt:
+                        cur.execute(stmt)
         conn.commit()
+
+
+def ensure_base_schema() -> None:
+    """Resume and undo tables. Must run before ensure_auth_schema, which alters them."""
+    _run_sql_files("schema.sql", "undo.sql")
+
+
+def ensure_v2_schema() -> None:
+    _run_sql_files("v2.sql")
 
 
 def record_version(

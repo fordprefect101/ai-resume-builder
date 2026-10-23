@@ -29,6 +29,15 @@ import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSess
 import { handleToolCallEvent } from './voice/handleRealtimeTools'
 import './styles/app.css'
 
+// Voice events that mean the assistant's reply has started playing. With a WebRTC
+// call the audio itself arrives on the media track; these names are confirmed by
+// the "voice event type seen" lines in the browser console during a session.
+const FIRST_SOUND_EVENTS = new Set([
+  'output_audio_buffer.started',
+  'response.output_audio.delta',
+  'response.audio.delta',
+])
+
 function App() {
   const [screen, setScreen] = useState<'landing' | 'workspace'>('landing')
   const [sessionId, setSessionId] = useState('demo')
@@ -54,6 +63,14 @@ function App() {
   sessionIdRef.current = sessionId
   const contentLocked = !isBasicsVerified(payload) || basicsDirty
   const doneTimer = useRef<number | null>(null)
+  // Speed baseline: when the person last stopped talking, and which voice events exist.
+  const speechStoppedAt = useRef<number | null>(null)
+  const seenEventTypes = useRef(new Set<string>())
+
+  function logTiming(line: string) {
+    console.info('[timing]', line)
+    setTranscriptLog((prev) => [...prev.slice(-50), `timing: ${line}`])
+  }
 
   function setVoice(mood: VoiceMood, caption?: string) {
     setVoiceMood(mood)
@@ -152,6 +169,19 @@ function App() {
 
       const handles = await startRealtimeSession(targetSessionId, async (event) => {
         const type = String(event.type ?? '')
+
+        if (!seenEventTypes.current.has(type)) {
+          seenEventTypes.current.add(type)
+          console.info('[timing] voice event type seen:', type)
+        }
+        if (type === 'input_audio_buffer.speech_stopped') {
+          speechStoppedAt.current = performance.now()
+        } else if (speechStoppedAt.current !== null && FIRST_SOUND_EVENTS.has(type)) {
+          const gapMs = Math.round(performance.now() - speechStoppedAt.current)
+          speechStoppedAt.current = null
+          logTiming(`reply started ${(gapMs / 1000).toFixed(2)} s after you stopped talking`)
+        }
+
         if (
           type.includes('transcript') ||
           type.includes('transcription') ||
@@ -193,6 +223,13 @@ function App() {
                   )
                 }
               }
+            },
+            (timing) => {
+              logTiming(
+                `${timing.name} took ${(timing.ms / 1000).toFixed(2)} s round trip, ` +
+                  `${timing.charsToAssistant.toLocaleString()} characters handed to the assistant` +
+                  (timing.ok ? '' : ' (failed)')
+              )
             }
           )
         }

@@ -12,6 +12,21 @@ No database or API key is needed. The script sets placeholder values for
 ## What runs today
 
 Everything lives in `run_evals.py` and uses `fixtures/sample_career.json`.
+`timing_report.py` is not a check: it summarizes the server's timing log (see `docs/SPEED.md`).
+
+## Walkthrough against a real database
+
+```bash
+docker compose up -d
+python evals/db_walkthrough.py          # includes two small paid AI calls
+python evals/db_walkthrough.py --no-ai  # skips them
+```
+
+`db_walkthrough.py` creates a fresh `resume_builder_test` database on the same
+server (real data is never touched), starts the API on it, and drives it with real
+requests: start a resume, confirm details, set skills, add entries, hide and show,
+reorder, undo, history, restore, raw save, finish setup. After each step it checks
+the stored record. It also confirms the server can start on an empty database.
 
 | Check | What it proves |
 |-------|----------------|
@@ -27,9 +42,11 @@ Everything lives in `run_evals.py` and uses `fixtures/sample_career.json`.
 | `v5_labels_survive_reload` | Labels that were set are kept across a reload |
 | `v5_rejects_unknown_labels` | Unknown fact kinds/owners and point statuses/origins are refused |
 | `save_door` | `_save_payload` normalizes, keeps an undo copy, and records a version entry |
+| `voice_add_entry_end_to_end` | The voice add-entry request runs through the real code (stand-in database and OpenAI) and saves the entry |
 | `single_save_door` | No code outside `_save_payload` / `_create_snapshot` writes a stored resume |
 | `example_record_is_current` | `api/resume-schema.example.json` is a valid, normalized v5 record |
 | `env_example_lists_settings` | `api/.env.example` names every setting the API code reads |
+| `timing_log` | The timing wrapper is installed, records duration, size and tidy-up time, and never writes a session id |
 
 ## Planned (not built yet)
 

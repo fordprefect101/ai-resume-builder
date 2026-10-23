@@ -149,13 +149,22 @@ export async function runResumeTool(
   throw new Error(`unknown tool: ${name}`)
 }
 
+export type ToolTiming = {
+  name: string
+  ms: number
+  charsToAssistant: number
+  ok: boolean
+}
+
 export async function handleToolCallEvent(
   dc: RTCDataChannel,
   sessionId: string,
   event: Record<string, unknown>,
-  onResult?: (result: unknown) => void
+  onResult?: (result: unknown) => void,
+  onTiming?: (timing: ToolTiming) => void
 ) {
   if (event.type !== 'response.function_call_arguments.done') return
+  const started = performance.now()
 
   const call: ToolCall = {
     call_id: String(event.call_id ?? ''),
@@ -173,13 +182,24 @@ export async function handleToolCallEvent(
 
   onResult?.(output)
 
+  // What the voice model will read: everything in outputText stays in the call.
+  const outputText = JSON.stringify(output)
+  const timing: ToolTiming = {
+    name: call.name,
+    ms: Math.round(performance.now() - started),
+    charsToAssistant: outputText.length,
+    ok: !(output && typeof output === 'object' && 'error' in output),
+  }
+  console.info('[timing] tool', timing)
+  onTiming?.(timing)
+
   dc.send(
     JSON.stringify({
       type: 'conversation.item.create',
       item: {
         type: 'function_call_output',
         call_id: call.call_id,
-        output: JSON.stringify(output),
+        output: outputText,
       },
     })
   )

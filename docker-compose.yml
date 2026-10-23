@@ -1,0 +1,28 @@
+# Local Postgres for development.
+#   Start:  docker compose up -d        Stop:  docker compose stop
+# Matches DATABASE_URL in api/.env.example. If your password differs, start with
+#   RESUME_DB_PASSWORD=<your password> docker compose up -d
+services:
+  db:
+    # Pinned: a newer major version cannot open data files written by 16.
+    image: postgres:16
+    container_name: resume-builder-db
+    environment:
+      POSTGRES_USER: resume
+      POSTGRES_DB: resume_builder
+      POSTGRES_PASSWORD: ${RESUME_DB_PASSWORD:-resume}
+    ports:
+      # Only this machine can connect (not other devices on the network).
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - resume-builder-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resume -d resume_builder"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  resume-builder-db-data:
+    # A fixed name, so the data is found again whatever folder this file is run from.
+    name: resume-builder-db-data

@@ -508,6 +508,196 @@ def test_save_door() -> bool:
     return ok
 
 
+class _FakeConnection:
+    """A stand-in database connection that serves one stored resume."""
+
+    def __init__(self, payload: dict, version: int = 3):
+        self.cursor_obj = _FakeCursor(version=version)
+        self.payload = payload
+        original_execute = self.cursor_obj.execute
+
+        def execute(sql: str, params: tuple = ()) -> None:
+            text = " ".join(sql.split())
+            if text.startswith("SELECT session_id, payload, version, user_id"):
+                self.cursor_obj.statements.append((text, params))
+                self.cursor_obj._row = (params[0], self.payload, version, None)
+            else:
+                original_execute(sql, params)
+
+        self.cursor_obj.execute = execute
+
+    def cursor(self):
+        return self
+
+    def commit(self) -> None:
+        pass
+
+    # The same object serves as connection and cursor context managers.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        return False
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        self.cursor_obj.execute(sql, params)
+
+    def fetchone(self):
+        return self.cursor_obj.fetchone()
+
+
+class _FakeOpenAI:
+    """Stands in for the OpenAI client: returns a fixed tidy-up result, counts calls."""
+
+    def __init__(self):
+        self.calls = 0
+        self.responses = self
+
+    def create(self, **_kwargs):
+        self.calls += 1
+        reply = {
+            "categories": ["backend"],
+            "skills": ["Python"],
+            "bullets": ["Built a thing for customers"],
+        }
+        return type("Reply", (), {"output_text": json.dumps(reply)})()
+
+
+def test_voice_add_entry_end_to_end() -> bool:
+    """The voice assistant's add-entry request, run through the real code path."""
+    import enrichment
+    import main
+
+    payload = load_fixture("sample_career.json")
+    connection = _FakeConnection(payload)
+    fake_ai = _FakeOpenAI()
+    saved_connect = main.psycopg.connect
+    saved_user = main.get_current_user
+    saved_client = enrichment.client
+    problems = []
+    try:
+        main.psycopg.connect = lambda *a, **k: connection
+        main.get_current_user = lambda request: None
+        enrichment.client = fake_ai
+        body = main.AddItemBody(
+            section="experience",
+            fields={"company": "NewCo", "title": "Engineer", "bullets": ["Built a thing"]},
+        )
+        result = main.tool_add_item("sess_1", body, request=None)
+    except Exception as err:
+        result = None
+        problems.append(f"request failed: {type(err).__name__}: {err}")
+    finally:
+        main.psycopg.connect = saved_connect
+        main.get_current_user = saved_user
+        enrichment.client = saved_client
+
+    if result is not None:
+        stored = result["payload"]
+        new_id = result.get("itemId")
+        points = [p["content"] for p in points_for_item(stored, "experience", new_id)]
+        if points != ["Built a thing for customers"]:
+            problems.append(f"saved points={points}")
+        if _copies_out_of_step(stored):
+            problems.append("bullets out of step with points")
+        if fake_ai.calls != 2:
+            problems.append(f"tidy-up model calls={fake_ai.calls} (expected 2)")
+        cur = connection.cursor_obj
+        history = cur.ran("INSERT INTO career_versions")
+        if len(history) != 1 or history[0][4] != "Added an entry to experience":
+            problems.append("no history entry for the new entry")
+        if len(cur.ran("INSERT INTO resume_undo")) != 1:
+            problems.append("no undo copy kept")
+    ok = not problems
+    print(f"voice_add_entry_end_to_end: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+async def _asgi_post(app, path: str) -> int:
+    """Send one POST request straight into an ASGI app, with no network involved."""
+    messages: list[dict] = []
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": b"",
+        "headers": [],
+        "client": ("test", 1),
+        "server": ("test", 80),
+    }
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+
+    await app(scope, receive, send)
+    return next(m["status"] for m in messages if m["type"] == "http.response.start")
+
+
+def test_timing_log() -> bool:
+    import asyncio
+    import tempfile
+    import time
+
+    from fastapi import FastAPI
+
+    import main
+    import timing
+
+    problems = []
+    if not any(m.cls is timing.TimingMiddleware for m in main.app.user_middleware):
+        problems.append("timing wrapper is not installed on the server")
+
+    app = FastAPI()
+
+    @app.post("/resume/{session_id}/tools/add_item")
+    def tool_add_item(session_id: str) -> dict:
+        with timing.timed("tidy_up"):
+            time.sleep(0.02)
+        return {"ok": True}
+
+    saved_path = timing.LOG_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        timing.LOG_PATH = Path(tmp) / "timing.jsonl"
+        try:
+            status = asyncio.run(
+                _asgi_post(
+                    timing.TimingMiddleware(app), "/resume/intake_secret123/tools/add_item"
+                )
+            )
+            lines = timing.LOG_PATH.read_text().splitlines()
+        finally:
+            timing.LOG_PATH = saved_path
+
+    if status != 200:
+        problems.append(f"request status={status}")
+    if len(lines) != 1:
+        problems.append(f"timing lines written={len(lines)}")
+    else:
+        record = json.loads(lines[0])
+        if "intake_secret123" in lines[0]:
+            problems.append("session id written to the timing log")
+        if record.get("route") != "/resume/{session_id}/tools/add_item":
+            problems.append(f"route={record.get('route')}")
+        if record.get("action") != "tool_add_item":
+            problems.append(f"action={record.get('action')}")
+        tidy = (record.get("parts") or {}).get("tidy_up") or 0
+        if tidy < 15 or record.get("ms", 0) < tidy:
+            problems.append(f"tidy-up time not recorded properly: {record}")
+        if not record.get("bytes"):
+            problems.append("reply size not recorded")
+    ok = not problems
+    print(f"timing_log: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -590,9 +780,11 @@ def main() -> int:
         test_v5_labels_survive_reload,
         test_v5_rejects_unknown_labels,
         test_save_door,
+        test_voice_add_entry_end_to_end,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,
+        test_timing_log,
     ]
     results = [t() for t in tests]
     passed = sum(results)

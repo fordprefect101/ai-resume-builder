@@ -19,6 +19,7 @@ from auth_routes import router as auth_router
 from chat import run_chat
 from claims import claim_provenance
 from context_selector import select_resume_context
+from enrichment import enrich_section_item
 from facts import sync_facts_from_item
 from jd_analyze import analyze_job_description, create_job_variant
 from mutation_pipeline import run_mutation
@@ -27,7 +28,13 @@ from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
 from retrieval import retrieve_evidence
 from traces import get_trace, log_trace
-from versions import ensure_v2_schema, get_version_snapshot, list_versions, record_version
+from versions import (
+    ensure_base_schema,
+    ensure_v2_schema,
+    get_version_snapshot,
+    list_versions,
+    record_version,
+)
 from resume_ops import (
     add_item,
     apply_item_enrichment,
@@ -44,6 +51,7 @@ from resume_ops import (
     set_skills,
     validate_intake_item_fields,
 )
+from timing import TimingMiddleware, timed
 from undo import pop_undo, push_undo
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -53,6 +61,8 @@ if not DATABASE_URL:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Order matters: auth.sql alters resume_snapshots, so the base tables come first.
+    ensure_base_schema()
     ensure_auth_schema()
     ensure_v2_schema()
     yield
@@ -68,6 +78,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last so it wraps everything, CORS included: the time is the whole request.
+app.add_middleware(TimingMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -562,7 +574,8 @@ def tool_add_item(session_id: str, body: AddItemBody, request: Request):
                 )
                 if body.enrich:
                     item = get_item(new_payload, body.section, new_id)
-                    enrichment = enrich_section_item(body.section, item)
+                    with timed("tidy_up"):
+                        enrichment = enrich_section_item(body.section, item)
                     if enrichment:
                         new_payload = apply_item_enrichment(
                             new_payload, body.section, new_id, enrichment

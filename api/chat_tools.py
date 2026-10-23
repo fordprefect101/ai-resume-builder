@@ -14,6 +14,7 @@ from resume_ops import (
     validate_intake_item_fields,
 )
 from enrichment import enrich_section_item
+from timing import timed
 from context_selector import select_resume_context
 
 # Re-export for callers that import catalogs from chat_tools
@@ -261,7 +262,8 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
         )
         new_payload, new_id = add_item(payload, section, fields)
         item = get_item(new_payload, section, new_id)
-        enrichment = enrich_section_item(section, item)
+        with timed("tidy_up"):
+            enrichment = enrich_section_item(section, item)
         if enrichment:
             new_payload = apply_item_enrichment(
                 new_payload, section, new_id, enrichment

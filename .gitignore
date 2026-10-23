@@ -8,6 +8,7 @@ dist-react/
 # Python API
 api/.env
 api/.venv/
+api/logs/
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
