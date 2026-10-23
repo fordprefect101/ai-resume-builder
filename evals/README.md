@@ -6,8 +6,9 @@ Run the deterministic evals:
 python evals/run_evals.py
 ```
 
-No database or API key is needed. The script sets placeholder values for
-`DATABASE_URL` and `OPENAI_API_KEY`, so it cannot reach either.
+No database or API key is needed. The script forces placeholder values for
+`DATABASE_URL` and `OPENAI_API_KEY` (a real key in your shell is replaced, not used) and
+blocks all network connections, so it cannot reach a database, a model or the internet.
 
 ## What runs today
 
@@ -44,6 +45,7 @@ the stored record. It also confirms the server can start on an empty database.
 | `save_door` | `_save_payload` normalizes, keeps an undo copy, and records a version entry |
 | `voice_add_entry_end_to_end` | The voice add-entry request runs through the real code (stand-in database and OpenAI) and saves the entry |
 | `assistant_result_is_small_and_constant` | The 8 voice actions return a short `assistantResult` with the agreed fields; its size does not grow from a 2-job to a 20-job resume (search is capped) |
+| `live_path_guard` | No voice action calls an AI model or opens a connection (except add-entry's allowed tidy-up); every voice tool is covered; the browser sends only the short result |
 | `single_save_door` | No code outside `_save_payload` / `_create_snapshot` writes a stored resume |
 | `example_record_is_current` | `api/resume-schema.example.json` is a valid, normalized v5 record |
 | `env_example_lists_settings` | `api/.env.example` names every setting the API code reads |

@@ -68,6 +68,24 @@ Measured on generated resumes through the real server code (characters):
 Action results stay the same size whatever the resume size; search is bounded by its 6-match cap.
 Not covered yet: the typed-chat path still returns bulky results to its model.
 
+## The speed guard (step 1b.3)
+
+The check `live_path_guard` in `evals/run_evals.py` fails when the live conversation's path
+is slowed or bloated. It runs every action the voice assistant can call, with every OpenAI
+client replaced by a counter and all network connections blocked, and checks:
+
+1. Every voice tool in `api/chat_tools.py` is covered. A new tool fails the guard until it is added to the check.
+2. With the tidy-up off, no action calls an AI model or opens a connection.
+3. The one allowed exception is exactly add-entry's tidy-up (`LIVE_AI_ALLOWED` in `run_evals.py`): two calls, from `enrichment` only. Delete that entry in phase 4, when the tidy-up moves to the background, and the guard tightens.
+4. Every short result keeps to the contract fields and stays under 1,800 characters.
+5. The browser sends the model only `resultForAssistant(output)` (read from `web/src/voice/handleRealtimeTools.ts`).
+
+Together with `assistant_result_is_small_and_constant`, this also fails if a result grows with the resume.
+
+Proved by breaking it on scratch copies: a new AI call, a new web request, a ninth tool without coverage, and the browser sending the full reply each fail the guard.
+
+Not covered: the typed-chat path and the first message that opens a call. The guard cannot measure real speed or catch slow code that makes no outside call; the timing log is for that.
+
 ## Recorded baselines
 
 ### 2026-10-14: size of what the voice model reads after one save (measured in code, no live session)

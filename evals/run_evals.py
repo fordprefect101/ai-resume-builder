@@ -13,9 +13,24 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "api"))
 
-# These evals never reach a database or a model; placeholders let main.py import.
-os.environ.setdefault("DATABASE_URL", "postgresql://unused-in-evals")
-os.environ.setdefault("OPENAI_API_KEY", "unused-in-evals")
+# These evals never reach a database, a model or the internet. Placeholders are forced
+# (not "set if missing"): a real key already in the shell must never be used here.
+os.environ["DATABASE_URL"] = "postgresql://unused-in-evals"
+os.environ["OPENAI_API_KEY"] = "unused-in-evals"
+
+
+def _block_network() -> None:
+    """Any accidental outside connection fails at once instead of reaching a service."""
+    import socket
+
+    def blocked(*_args, **_kwargs):
+        raise OSError("the evals do not open network connections")
+
+    socket.socket.connect = blocked
+    socket.socket.connect_ex = blocked
+
+
+_block_network()
 
 from context_selector import select_resume_context
 from claim_verify import verify_claim
@@ -732,8 +747,14 @@ def _resume_with_jobs(jobs: int, points_each: int) -> dict:
     return normalize_payload(raw)
 
 
-def _voice_replies(payload: dict) -> dict[str, dict]:
-    """Run the voice actions through the real server code on a stand-in database."""
+def _voice_replies(
+    payload: dict, *, enrich: bool = False, catch: bool = True
+) -> dict[str, dict]:
+    """
+    Run the voice actions through the real server code on a stand-in database.
+    enrich=True lets add_item run its AI tidy-up; catch=True (the default) records an
+    action that raises as {"raised": "..."} so the checks report it instead of crashing.
+    """
     import main
 
     saved_connect, saved_user = main.psycopg.connect, main.get_current_user
@@ -753,7 +774,7 @@ def _voice_replies(payload: dict) -> dict[str, dict]:
                         "endDate": "2025-12",
                         "bullets": ["Built it"],
                     },
-                    enrich=False,
+                    enrich=enrich,
                 ),
                 request=None,
             ),
@@ -794,7 +815,13 @@ def _voice_replies(payload: dict) -> dict[str, dict]:
         }
         for name, call in calls.items():
             main.psycopg.connect = lambda *a, **k: _FakeConnection(json.loads(json.dumps(payload)))
-            replies[name] = call()
+            if not catch:
+                replies[name] = call()
+                continue
+            try:
+                replies[name] = call()
+            except Exception as err:  # recorded; the guard decides whether that is a problem
+                replies[name] = {"raised": f"{type(err).__name__}: {err}"}
     finally:
         main.psycopg.connect, main.get_current_user = saved_connect, saved_user
     return replies
@@ -859,6 +886,129 @@ def test_assistant_result_is_small_and_constant() -> bool:
         f"assistant_result_is_small_and_constant: {'PASS' if ok else 'FAIL'} "
         f"(largest short result={biggest} characters, "
         f"add_item full reply on 20 jobs={sizes.get('add_item', (0, 0, 0))[2]}, problems={problems})"
+    )
+    return ok
+
+
+# The live path may not call an AI model or any outside service, with ONE known
+# exception: add_item's tidy-up (enrichment). It is removed in phase 4, when the
+# tidy-up moves to the background; delete this entry then and the guard tightens.
+LIVE_AI_ALLOWED = {"add_item": {"enrichment"}}
+
+ASSISTANT_RESULT_FIELDS = {
+    "ok", "tool", "message", "section", "itemId", "progress",
+    "candidates", "ambiguous", "error",
+}
+
+
+class _SpyClient:
+    """Stands in for an OpenAI client: counts calls; only tidy-up gets a real-looking reply."""
+
+    def __init__(self, module: str, log: list):
+        self.module, self.log = module, log
+        self.responses = self
+        self.chat = self
+        self.completions = self
+
+    def create(self, **_kwargs):
+        self.log.append(self.module)
+        reply = {"categories": ["backend"], "skills": ["Python"], "bullets": ["Built it for customers"]}
+        return type("Reply", (), {"output_text": json.dumps(reply)})()
+
+
+def _live_run(payload: dict, *, enrich: bool) -> tuple[dict, list, list]:
+    """
+    Run the voice actions with every OpenAI client replaced by a spy and all network
+    connections blocked. Returns (replies, AI calls as [(action, module)], network attempts).
+    """
+    import importlib
+    import socket
+
+    ai_calls: list[str] = []
+    attempts: list[str] = []
+    patched = []
+    for path in sorted((ROOT / "api").glob("*.py")):
+        module = importlib.import_module(path.stem)
+        if hasattr(module, "client") and type(module.client).__name__ == "OpenAI":
+            patched.append((module, module.client))
+            module.client = _SpyClient(path.stem, ai_calls)
+
+    def blocked(*args, **kwargs):
+        attempts.append("network connection attempted")
+        raise OSError("network is blocked during the live-path guard")
+
+    saved_connect, saved_ex = socket.socket.connect, socket.socket.connect_ex
+    socket.socket.connect, socket.socket.connect_ex = blocked, blocked
+    try:
+        replies = _voice_replies(payload, enrich=enrich, catch=True)
+    finally:
+        socket.socket.connect, socket.socket.connect_ex = saved_connect, saved_ex
+        for module, original in patched:
+            module.client = original
+    return replies, ai_calls, attempts
+
+
+def test_live_path_guard() -> bool:
+    """Nothing the person waits on may call an AI model or an outside service."""
+    import chat_tools
+
+    problems = []
+    payload = _resume_with_jobs(3, 3)
+
+    # 1. Every action the assistant can call is covered.
+    tools = {t["name"] for t in chat_tools.TOOL_DEFINITIONS} | {
+        t["name"] for t in chat_tools.INTAKE_TOOL_DEFINITIONS
+    }
+    replies, ai_calls, attempts = _live_run(payload, enrich=False)
+    uncovered = sorted(tools - set(replies))
+    if uncovered:
+        problems.append(f"voice tools not covered by the guard: {uncovered}")
+
+    # 2. With the tidy-up off, no action calls any AI model or opens any connection.
+    if ai_calls:
+        problems.append(f"AI calls on the live path: {ai_calls}")
+    if attempts:
+        problems.append(f"{len(attempts)} network attempts on the live path")
+    for name, reply in replies.items():
+        if "raised" in reply:
+            problems.append(f"{name} raised: {reply['raised']}")
+
+    # 3. The one allowed exception is exactly that, and nothing more.
+    _replies, tidy_calls, tidy_attempts = _live_run(payload, enrich=True)
+    modules = set(tidy_calls)
+    if modules != LIVE_AI_ALLOWED["add_item"]:
+        problems.append(f"add_item with tidy-up called {sorted(modules)}, allowed {sorted(LIVE_AI_ALLOWED['add_item'])}")
+    if len(tidy_calls) != 2:
+        problems.append(f"tidy-up made {len(tidy_calls)} calls (expected 2)")
+    if tidy_attempts:
+        problems.append("network attempts during the tidy-up")
+
+    # 4. Each short result keeps to the contract and never carries the record.
+    for name, reply in replies.items():
+        result = reply.get("assistantResult")
+        if not isinstance(result, dict):
+            problems.append(f"{name}: no assistantResult")
+            continue
+        extra = set(result) - ASSISTANT_RESULT_FIELDS
+        if extra:
+            problems.append(f"{name}: unexpected fields {sorted(extra)}")
+        if len(json.dumps(result)) > 1800:
+            problems.append(f"{name}: short result is {len(json.dumps(result))} characters")
+
+    # 5. The browser sends the model only the short result.
+    ts = (ROOT / "web" / "src" / "voice" / "handleRealtimeTools.ts").read_text()
+    if ts.count("function_call_output") != 1:
+        problems.append("browser sends tool results to the model in more than one place")
+    if "const outputText = JSON.stringify(resultForAssistant(output))" not in ts:
+        problems.append("browser no longer builds the model's tool result with resultForAssistant")
+    if "output: outputText" not in ts:
+        problems.append("browser sends something other than outputText to the model")
+
+    ok = not problems
+    print(
+        f"live_path_guard: {'PASS' if ok else 'FAIL'} "
+        f"(actions covered={len(replies)}/{len(tools)}, AI calls with tidy-up off={len(ai_calls)}, "
+        f"network attempts={len(attempts)}, tidy-up calls={len(tidy_calls)}, problems={problems})"
     )
     return ok
 
@@ -947,6 +1097,7 @@ def main() -> int:
         test_save_door,
         test_voice_add_entry_end_to_end,
         test_assistant_result_is_small_and_constant,
+        test_live_path_guard,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,
