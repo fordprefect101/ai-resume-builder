@@ -23,6 +23,7 @@ import { EMPTY_PAYLOAD } from './constants/emptyPayload'
 import {
   isBasicsVerified,
   isResumePayload,
+  type BasicsInput,
   type ResumePayload,
 } from './types/resume'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
@@ -391,14 +392,7 @@ function App() {
     }
   }
 
-  async function handleConfirmBasics(basics: {
-    fullName: string
-    email: string
-    phone: string
-    location: string
-    github: string
-    linkedin: string
-  }) {
+  async function handleConfirmBasics(basics: BasicsInput) {
     try {
       setBusyAction('basics')
       const data = await updateResumeBasics(sessionIdRef.current, basics)

@@ -11,7 +11,7 @@
     "basics": {
       "fullName": "Ada Lovelace",
       "email": "ada@example.com",
-      "phone": "+1 555 0100",
+      "phone": "+44 20 7946 0958",
       "location": "London, UK",
       "links": [
         {
@@ -21,8 +21,49 @@
         {
           "label": "GitHub",
           "url": "https://github.com/ada"
+        },
+        {
+          "label": "Portfolio",
+          "url": "https://ada.dev"
         }
-      ]
+      ],
+      "contactChecks": {
+        "email": {
+          "fingerprint": "b5fc85e55755f9e0",
+          "shape": "ok",
+          "reach": "exists",
+          "message": "example.com can receive email.",
+          "checkedAt": "2026-10-25T12:00:00+00:00"
+        },
+        "phone": {
+          "fingerprint": "8326724cd3e7c541",
+          "shape": "ok",
+          "reach": null,
+          "message": "",
+          "checkedAt": "2026-10-25T12:00:00+00:00"
+        },
+        "linkedin": {
+          "fingerprint": "595caa3abc3e4a37",
+          "shape": "ok",
+          "reach": null,
+          "message": "",
+          "checkedAt": "2026-10-25T12:00:00+00:00"
+        },
+        "github": {
+          "fingerprint": "78e025f3428becee",
+          "shape": "ok",
+          "reach": "exists",
+          "message": "This GitHub account exists.",
+          "checkedAt": "2026-10-25T12:00:00+00:00"
+        },
+        "portfolio": {
+          "fingerprint": "8b28809a68a059dd",
+          "shape": "ok",
+          "reach": "not_found",
+          "message": "The page wasn't found.",
+          "checkedAt": "2026-10-25T12:00:00+00:00"
+        }
+      }
     },
     "skills": [
       "Python",
@@ -109,7 +150,18 @@
             "bullets": [
               "Built an end-to-end pipeline for processing 30-second clips."
             ],
-            "url": "",
+            "url": "https://github.com/ada/music-transcription",
+            "linkCheck": {
+              "fingerprint": "459b8ab71dcbce6a",
+              "shape": "ok",
+              "reach": "exists",
+              "message": "This public repository exists.",
+              "checkedAt": "2026-10-25T12:00:00+00:00",
+              "languages": [
+                "Python"
+              ],
+              "private": false
+            },
             "categories": [
               "audio",
               "side-project"

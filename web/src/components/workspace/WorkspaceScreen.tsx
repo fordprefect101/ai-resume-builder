@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { AuthUser } from '../../api/authApi'
-import type { ResumePayload } from '../../types/resume'
+import type { BasicsInput, ResumePayload } from '../../types/resume'
 import { ResumeEditor, ResumePreview } from '../resume'
 import { IntelligencePanel } from '../intelligence'
 import { VoiceOrb, type VoiceMood } from '../voice'
@@ -18,14 +18,7 @@ type Props = {
   voiceMood: VoiceMood
   voiceCaption: string
   transcriptLog: string[]
-  onConfirmBasics: (basics: {
-    fullName: string
-    email: string
-    phone: string
-    location: string
-    github: string
-    linkedin: string
-  }) => void
+  onConfirmBasics: (basics: BasicsInput) => void
   onBasicsDirtyChange: (dirty: boolean) => void
   onMoveSection: (section: string, direction: -1 | 1) => void
   onMoveItem: (section: string, itemId: string, direction: -1 | 1) => void
@@ -144,6 +137,7 @@ export function WorkspaceScreen({
           />
           <ResumeEditor
             payload={payload}
+            sessionId={sessionId}
             busyAction={busyAction}
             contentLocked={contentLocked}
             onConfirmBasics={onConfirmBasics}

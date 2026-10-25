@@ -50,9 +50,12 @@ confirmation still applies during voice intake.
 | `email` | string | no |
 | `phone` | string | no |
 | `location` | string | no |
-| `links` | `{ label, url }[]` | yes (`[]` OK; LinkedIn/GitHub are stored here) |
+| `links` | `{ label, url }[]` | yes (`[]` OK; LinkedIn, GitHub and Portfolio are stored here, found by their label) |
+| `contactChecks` | object | no. What the contact checks found, one record per field (`email`, `phone`, `github`, `linkedin`, `portfolio`). Written only by the server; see [CONTACT-CHECKS.md](CONTACT-CHECKS.md). Resumes without it load as "unchecked" |
 
-Edit basics with `PATCH /resume/{session_id}/basics`, not AI tools. Verification is `intake.basicsVerified`.
+Each `contactChecks` record: `fingerprint` (a short code for the exact text that was checked; a record whose code no longer matches the field is stale and ignored), `shape` (`ok` or `broken`), `reach` (`exists`, `not_found`, `unavailable` or `null` when no lookup applies), `message`, `checkedAt`.
+
+Edit basics with `PATCH /resume/{session_id}/basics`, not AI tools. Verification is `intake.basicsVerified`. Saving runs the instant "looks right" checks; "Save and confirm" is refused while a filled-in field is plainly broken. The lookups run in the background after the save.
 
 ### `inventory.sections[sectionKey]`
 
@@ -71,6 +74,8 @@ Most section items include:
 |-------|------|-------|
 | `id` | string | **Required**, stable (for tools) |
 | `status` | `"active"` \| `"archived"` | Default `active` |
+
+A Projects item with a `url` also gets a `linkCheck` record: the same fields as a `contactChecks` record plus `languages` (what GitHub reports for a public repository, biggest first) and `private` (true when the person says the repository is private; it is then never looked up). It is information for the person only: it never changes a point, fact or point status, and is not printed on the resume. See [CONTACT-CHECKS.md](CONTACT-CHECKS.md).
 
 Experience/projects may also have `categories[]` and `skills[]` (enrichment). Education stays a credential line (degree, institution, dates) — research/awards belong in other sections.
 

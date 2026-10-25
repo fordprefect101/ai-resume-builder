@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -15,6 +14,8 @@ import bcrypt
 import psycopg
 from fastapi import HTTPException, Request, Response
 
+from contact.shape import EMAIL_RE, normalize_email
+
 logger = logging.getLogger("auth")
 
 COOKIE_NAME = "rb_session"
@@ -22,7 +23,6 @@ SESSION_DAYS = 30
 VERIFY_HOURS = 48
 RESET_HOURS = 2
 MIN_PASSWORD = 8
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
@@ -47,10 +47,6 @@ def ensure_auth_schema() -> None:
             for statement in statements:
                 cur.execute(statement)
         conn.commit()
-
-
-def normalize_email(email: str) -> str:
-    return str(email or "").strip().lower()
 
 
 def validate_email(email: str) -> str:

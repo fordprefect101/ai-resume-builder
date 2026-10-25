@@ -671,6 +671,105 @@
   padding: 9px 14px;
 }
 
+.contact-badge {
+  justify-self: start;
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.contact-badge.looks_right {
+  background: var(--sage-soft);
+  color: #3f5340;
+}
+
+.contact-badge.exists {
+  background: var(--sage);
+  color: #fff;
+}
+
+.contact-badge.warning {
+  background: var(--amber-soft);
+  color: #8a5b16;
+}
+
+.contact-badge.broken {
+  background: #f8e1de;
+  color: #8f2d22;
+}
+
+.contact-badge.private {
+  background: var(--border);
+  color: var(--muted);
+}
+
+.project-link-line {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0 var(--space-4);
+  font-size: 12px;
+}
+
+.project-link-url {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.project-link-languages {
+  color: var(--muted);
+}
+
+.project-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.project-link-actions .contact-recheck {
+  margin-top: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.contact-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.contact-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.contact-actions .primary-action {
+  margin-top: var(--space-1);
+}
+
+.contact-recheck {
+  margin-top: var(--space-1);
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.contact-recheck:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.contact-error {
+  margin: 0;
+  color: #8f2d22;
+  font-size: 12px;
+}
+
 .basics-gate-note {
   margin: 0 0 var(--space-3);
   padding: var(--space-3);

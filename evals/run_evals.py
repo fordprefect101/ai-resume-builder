@@ -32,6 +32,8 @@ def _block_network() -> None:
 
 _block_network()
 
+from fastapi import BackgroundTasks
+
 from context_selector import select_resume_context
 from claim_verify import verify_claim
 from claims import new_point, points_for_item, set_item_points
@@ -605,7 +607,9 @@ def test_voice_add_entry_end_to_end() -> bool:
             section="experience",
             fields={"company": "NewCo", "title": "Engineer", "bullets": ["Built a thing"]},
         )
-        result = main.tool_add_item("sess_1", body, request=None)
+        result = main.tool_add_item(
+            "sess_1", body, request=None, background_tasks=BackgroundTasks()
+        )
     except Exception as err:
         result = None
         problems.append(f"request failed: {type(err).__name__}: {err}")
@@ -788,6 +792,7 @@ def _voice_replies(
                     enrich=enrich,
                 ),
                 request=None,
+                background_tasks=BackgroundTasks(),
             ),
             "complete_intake": lambda: main.tool_complete_intake(
                 "s",
@@ -1490,6 +1495,26 @@ def test_example_record_is_current() -> bool:
         problems.append("normalizing it changes it; regenerate the file")
     if _copies_out_of_step(example):
         problems.append(f"bullets differ from points: {_copies_out_of_step(example)}")
+    # The example shows stored contact checks and a project link check. Each result must
+    # still match the value it checked, or the example has gone stale.
+    from contact import project_links, status as contact_status
+
+    basics = example["inventory"]["basics"]
+    if not basics.get("contactChecks"):
+        problems.append("the example shows no contact checks")
+    if contact_status.prune_stale(basics) != basics:
+        problems.append("a contact check in the example no longer matches its field")
+    if contact_status.gate(basics)["blocked"]:
+        problems.append(f"the example's own details fail the gate: {contact_status.gate(basics)}")
+    linked = [
+        item for item in example["inventory"]["sections"]["projects"]["items"]
+        if item.get("linkCheck")
+    ]
+    if not linked:
+        problems.append("the example shows no project link check")
+    for item in linked:
+        if project_links.refresh_item(item) != item:
+            problems.append(f"project {item['id']}: its link check no longer matches its link")
     ok = not problems
     print(f"example_record_is_current: {'PASS' if ok else 'FAIL'} (problems={problems})")
     return ok
@@ -1515,8 +1540,853 @@ def test_env_example_lists_settings() -> bool:
     return ok
 
 
+def test_contact_shape_rules() -> bool:
+    from contact.shape import (
+        check_email,
+        check_github,
+        check_linkedin,
+        check_phone,
+        check_web_url,
+        normalize_github_url,
+        normalize_linkedin_url,
+    )
+
+    def status(check, value, *args) -> str:
+        return check(value, *args)["status"]
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    for good in ("a@b.co", "  Parth.Rana+cv@Example.COM "):
+        expect(f"email {good!r}", status(check_email, good), "ok")
+    for bad in ("no-at-sign", "a@b", "a b@c.com", "a@@b.com", "a@b..com", "@b.com"):
+        expect(f"email {bad!r}", status(check_email, bad), "broken")
+    expect("email empty", status(check_email, "  "), "empty")
+    typo = check_email("sam@gmial.com")
+    expect("email typo stays ok", typo["status"], "ok")
+    expect("email typo suggestion", typo["suggestion"], "sam@gmail.com")
+    expect("email no false suggestion", check_email("sam@gmail.com")["suggestion"], "")
+
+    for good in ("parth", "@parth-rana", "https://github.com/parth/repo", "a1"):
+        expect(f"github {good!r}", status(check_github, good), "ok")
+    for bad in ("-parth", "parth-", "pa--rth", "pa rth", "a" * 40, "git hub!"):
+        expect(f"github {bad!r}", status(check_github, bad), "broken")
+    expect(
+        "github normalised",
+        normalize_github_url("github.com/parth/repo"),
+        "https://github.com/parth",
+    )
+
+    for good in ("linkedin.com/in/parth-rana", "in/parth", "https://www.linkedin.com/in/x"):
+        expect(f"linkedin {good!r}", status(check_linkedin, good), "ok")
+    for bad in ("https://evil.com/in/parth", "https://linkedin.com.evil.com/in/x",
+                "https://www.linkedin.com/"):
+        expect(f"linkedin {bad!r}", status(check_linkedin, bad), "broken")
+    expect(
+        "linkedin normalised",
+        normalize_linkedin_url("@parth"),
+        "https://www.linkedin.com/in/parth",
+    )
+
+    for good in ("example.com", "https://me.dev/portfolio?x=1", "http://sub.site.io:8080/a"):
+        expect(f"url {good!r}", status(check_web_url, good), "ok")
+    for bad in ("localhost", "ftp://example.com", "javascript:alert(1)",
+                "http://exa mple.com", "https://", "nodots", "http://a.b.c:99999"):
+        expect(f"url {bad!r}", status(check_web_url, bad), "broken")
+
+    expect("phone valid +44", status(check_phone, "+44 20 7946 0958"), "ok")
+    expect("phone E164", check_phone("+44 20 7946 0958")["value"], "+442079460958")
+    expect("phone too short", status(check_phone, "+1 555 0100"), "broken")
+    expect("phone letters", status(check_phone, "+44 abc"), "broken")
+    expect("phone needs country", status(check_phone, "07700 900123"), "ok")
+    expect(
+        "phone with default region",
+        check_phone("020 7946 0958", "GB")["value"],
+        "+442079460958",
+    )
+    expect("phone empty", status(check_phone, ""), "empty")
+
+    ok = not problems
+    print(
+        f"contact_shape_rules: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_safe_fetch_refuses_dangerous_links() -> bool:
+    from contact import safe_fetch
+
+    names = {
+        "example.com": ["93.184.216.34"],
+        "mixed.example": ["93.184.216.34", "10.0.0.5"],
+        "sneaky.example": ["127.0.0.1"],
+        "mapped.example": ["::ffff:127.0.0.1"],
+        "redirector.example": ["93.184.216.35"],
+    }
+    opened: list[str] = []
+
+    def fake_resolve(host: str) -> list[str]:
+        if host not in names:
+            raise safe_fetch.FetchFailed("the address could not be found")
+        return names[host]
+
+    def fake_request(scheme, host, ip, port, path, method, timeout):
+        opened.append(f"{host}@{ip}")
+        if host == "redirector.example":
+            return 302, {"location": "http://169.254.169.254/latest/meta-data"}, b""
+        return 200, {}, b"ok"
+
+    real_resolve, real_request = safe_fetch._resolve, safe_fetch._request
+    safe_fetch._resolve, safe_fetch._request = fake_resolve, fake_request
+    problems: list[str] = []
+    try:
+        dangerous = [
+            "http://localhost",
+            "http://localhost:8081/admin",
+            "http://127.0.0.1",
+            "http://127.1",
+            "http://2130706433",
+            "http://0x7f.0.0.1",
+            "http://0.0.0.0",
+            "http://10.0.0.1",
+            "http://172.16.5.5",
+            "http://192.168.1.5",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]",
+            "http://[::ffff:127.0.0.1]",
+            "http://[fe80::1]",
+            "http://printer.local",
+            "http://sneaky.example",
+            "http://mapped.example",
+            "http://mixed.example",
+            "file:///etc/passwd",
+            "ftp://example.com",
+            "gopher://example.com",
+            "javascript:alert(1)",
+            "http://user:pass@example.com",
+            "http://example.com:22",
+            "http://example.com:8081",
+            "https://",
+            "",
+        ]
+        for link in dangerous:
+            try:
+                safe_fetch.fetch(link)
+                problems.append(f"not refused: {link!r}")
+            except safe_fetch.Refused:
+                pass
+            except Exception as exc:
+                problems.append(f"{link!r} failed another way: {exc!r}")
+        if opened:
+            problems.append(f"connection attempted for refused links: {opened}")
+
+        good = safe_fetch.fetch("https://example.com/me")
+        if good["status"] != 200 or opened != ["example.com@93.184.216.34"]:
+            problems.append(f"public link not opened at the checked address: {opened}")
+
+        del opened[:]
+        try:
+            safe_fetch.fetch("http://redirector.example/start")
+            problems.append("redirect to a private address was followed")
+        except safe_fetch.Refused:
+            pass
+        if opened != ["redirector.example@93.184.216.35"]:
+            problems.append(f"redirect hop opened something else: {opened}")
+    finally:
+        safe_fetch._resolve, safe_fetch._request = real_resolve, real_request
+
+    ok = not problems
+    print(
+        f"safe_fetch_refuses_dangerous_links: {'PASS' if ok else 'FAIL'} "
+        f"(links tried={len(dangerous)}, problems={problems})"
+    )
+    return ok
+
+
+def test_contact_exists_lookups() -> bool:
+    """Rung 2 answers, replayed from recorded responses (no internet)."""
+    import json as _json
+
+    import dns.exception
+    import dns.resolver
+
+    from contact import github, reach, safe_fetch
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    # --- email provider (recorded DNS answers) ---
+    dns_answers = {
+        ("ok.example", "MX"): ["10 mail.ok.example."],
+        ("nomx.example", "MX"): dns.resolver.NoAnswer(),
+        ("nomx.example", "A"): ["93.184.216.34"],
+        ("nullmx.example", "MX"): ["0 ."],
+        ("nomail.example", "MX"): dns.resolver.NoAnswer(),
+        ("nomail.example", "A"): dns.resolver.NoAnswer(),
+        ("gone.example", "MX"): dns.resolver.NXDOMAIN(),
+        ("slow.example", "MX"): dns.exception.Timeout(),
+    }
+
+    def fake_dns(domain, record_type):
+        answer = dns_answers[(domain, record_type)]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    real_dns = reach._dns_query
+    reach._dns_query = fake_dns
+    try:
+        for email, want in (
+            ("a@ok.example", "exists"),
+            ("a@nomx.example", "exists"),
+            ("a@nullmx.example", "not_found"),
+            ("a@nomail.example", "not_found"),
+            ("a@gone.example", "not_found"),
+            ("a@slow.example", "unavailable"),
+            ("not-an-email", "not_found"),
+        ):
+            expect(f"email {email}", reach.check_email_domain(email)["status"], want)
+    finally:
+        reach._dns_query = real_dns
+
+    # --- web pages and GitHub (recorded HTTP answers) ---
+    calls: list[tuple[str, str]] = []
+    recorded: dict[tuple[str, str], object] = {}
+
+    def reply(status, body=b"", headers=None):
+        return {"status": status, "url": "", "headers": headers or {}, "body": body}
+
+    def fake_fetch(url, *, method="HEAD", timeout=5):
+        calls.append((method, url))
+        answer = recorded[(method, url)]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    real_fetch = safe_fetch.fetch
+    safe_fetch.fetch = fake_fetch
+    try:
+        recorded.update({
+            ("HEAD", "https://up.example/"): reply(200),
+            ("HEAD", "https://picky.example/"): reply(405),
+            ("GET", "https://picky.example/"): reply(200),
+            ("HEAD", "https://missing.example/"): reply(404),
+            ("HEAD", "https://broken.example/"): reply(500),
+            ("HEAD", "https://slow.example/"): safe_fetch.FetchFailed("slow"),
+            ("HEAD", "https://nxdomain.example/"): safe_fetch.NameNotFound("none"),
+            ("HEAD", "http://127.0.0.1/"): safe_fetch.Refused("private"),
+        })
+        for url, want in (
+            ("https://up.example/", "exists"),
+            ("https://picky.example/", "exists"),
+            ("https://missing.example/", "not_found"),
+            ("https://broken.example/", "unavailable"),
+            ("https://slow.example/", "unavailable"),
+            ("https://nxdomain.example/", "not_found"),
+            ("http://127.0.0.1/", "not_found"),
+        ):
+            expect(f"page {url}", reach.check_page(url)["status"], want)
+
+        api = "https://api.github.com"
+        limited = {"x-ratelimit-remaining": "0"}
+        recorded.update({
+            ("GET", f"{api}/users/octocat"): reply(200, _json.dumps({"login": "octocat"}).encode()),
+            ("GET", f"{api}/users/ghost-user-xyz"): reply(404),
+            ("GET", f"{api}/users/busy"): reply(403, headers=limited),
+            ("GET", f"{api}/users/flaky"): safe_fetch.FetchFailed("slow"),
+            ("GET", f"{api}/repos/octocat/hello"): reply(200, _json.dumps({"private": False}).encode()),
+            ("GET", f"{api}/repos/octocat/hello/languages"): reply(
+                200, _json.dumps({"Python": 100, "TypeScript": 900, "CSS": 5}).encode()
+            ),
+            ("GET", f"{api}/repos/octocat/secret"): reply(404),
+            ("GET", f"{api}/repos/octocat/limited"): reply(429),
+        })
+        user = github.lookup_user("octocat")
+        expect("github user exists", (user["status"], user["login"]), ("exists", "octocat"))
+        expect("github user missing", github.lookup_user("ghost-user-xyz")["status"], "not_found")
+        expect("github rate limited", github.lookup_user("busy")["status"], "unavailable")
+        expect("github down", github.lookup_user("flaky")["status"], "unavailable")
+        before = len(calls)
+        expect("bad name never sent", github.lookup_user("../etc")["status"], "not_found")
+        expect("bad name made no call", len(calls), before)
+
+        repo = github.lookup_repo("https://github.com/octocat/hello.git")
+        expect("repo exists", repo["status"], "exists")
+        expect("repo languages by size", repo.get("languages"), ["TypeScript", "Python", "CSS"])
+        secret = github.lookup_repo("https://github.com/octocat/secret")
+        expect("private repo not found", secret["status"], "not_found")
+        expect("private repo no languages", "languages" in secret, False)
+        expect("private repo wording", "private" in secret["message"], True)
+        expect("repo rate limited", github.lookup_repo("github.com/octocat/limited")["status"], "unavailable")
+        expect("non-repo link", github.lookup_repo("https://example.com/a/b")["status"], "not_found")
+        expect("user-only link", github.lookup_repo("https://github.com/octocat")["status"], "not_found")
+        expect("parse trailing path", github.parse_repo_link("https://github.com/o/r/tree/main"), ("o", "r"))
+        outside = [url for _m, url in calls if not url.startswith(api) and "example" not in url and "127.0.0.1" not in url]
+        expect("only expected hosts called", outside, [])
+    finally:
+        safe_fetch.fetch = real_fetch
+
+    ok = not problems
+    print(
+        f"contact_exists_lookups: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_contact_status_and_gate() -> bool:
+    from datetime import datetime, timezone
+
+    from contact import shape, status
+    from payload_normalize import normalize_payload
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    basics = {
+        "fullName": "Sam",
+        "email": "sam@example.com",
+        "phone": "",
+        "location": "",
+        "links": [{"label": "GitHub", "url": "https://github.com/sam"}],
+    }
+    when = datetime(2026, 10, 25, tzinfo=timezone.utc)
+
+    expect("never checked", status.field_view(basics, "github")["level"], "unchecked")
+    expect("empty field", status.field_view(basics, "phone")["level"], "empty")
+
+    checked = status.record_check(
+        basics,
+        "github",
+        shape.check_github("https://github.com/sam"),
+        {"status": "exists", "message": "This GitHub account exists."},
+        now=when,
+    )
+    expect("exists after check", status.field_view(checked, "github")["level"], "exists")
+    expect("input not changed", "contactChecks" in basics, False)
+    expect("time recorded", checked["contactChecks"]["github"]["checkedAt"], when.isoformat())
+
+    # Editing the value drops the badge; leaving it alone keeps it.
+    edited = {**checked, "links": [{"label": "GitHub", "url": "https://github.com/sam2"}]}
+    expect("edit resets badge", status.field_view(edited, "github")["level"], "unchecked")
+    expect("edit pruned", "github" in status.prune_stale(edited).get("contactChecks", {}), False)
+    expect("unchanged kept", status.prune_stale(checked), checked)
+    other_field = {**checked, "email": "new@example.com"}
+    expect("other field edit keeps github", status.field_view(other_field, "github")["level"], "exists")
+
+    # Warnings versus looks-right.
+    for reach_status, want in (
+        ("not_found", "warning"),
+        ("unavailable", "warning"),
+        (None, "looks_right"),
+    ):
+        reach = {"status": reach_status, "message": "m"} if reach_status else None
+        state = status.record_check(basics, "github", shape.check_github("sam"), reach, now=when)
+        expect(f"view for {reach_status}", status.field_view(state, "github")["level"], want)
+    broken_state = status.record_check(basics, "email", {"status": "broken", "message": "bad"}, now=when)
+    expect("broken view", status.field_view(broken_state, "email")["level"], "broken")
+
+    # Bad stored data never crashes.
+    for junk in ("text", 5, ["x"], {"github": "oops"}, {"nonsense": {}}):
+        try:
+            status.field_view({**basics, "contactChecks": junk}, "github")
+            status.prune_stale({**basics, "contactChecks": junk})
+        except Exception as exc:
+            problems.append(f"junk {junk!r} crashed: {exc!r}")
+
+    # The gate: only plainly broken filled-in fields block.
+    expect("clean basics pass", status.gate(basics)["blocked"], False)
+    expect("empty basics pass", status.gate({})["blocked"], False)
+    bad_email = status.gate({**basics, "email": "no-at-sign"})
+    expect("broken email blocks", (bad_email["blocked"], bad_email["blockers"][0]["field"]), (True, "email"))
+    bad_link = status.gate({**basics, "links": [{"label": "GitHub", "url": "https://github.com/-bad-"}]})
+    expect("broken github blocks", bad_link["blocked"], True)
+    # A missing account is a warning, never a block, whatever was stored.
+    missing = status.record_check(
+        basics, "github", shape.check_github("sam"),
+        {"status": "not_found", "message": "No account."}, now=when,
+    )
+    expect("not found does not block", status.gate(missing)["blocked"], False)
+    expect("unavailable does not block", status.gate(
+        status.record_check(basics, "github", shape.check_github("sam"),
+                            {"status": "unavailable", "message": "later"}, now=when)
+    )["blocked"], False)
+    expect("typo suggestion does not block", status.gate({**basics, "email": "sam@gmial.com"})["blocked"], False)
+    expect("phone without country does not block", status.gate({**basics, "phone": "07700 900123"})["blocked"], False)
+
+    # Old and new saved resumes keep or lack the section harmlessly.
+    saved = normalize_payload(
+        {"schemaVersion": 5, "inventory": {"sections": {}, "basics": checked}}
+    )
+    expect(
+        "checks survive upgrade",
+        (saved["inventory"]["basics"].get("contactChecks") or {}).get("github", {}).get("reach"),
+        "exists",
+    )
+    old = normalize_payload({"schemaVersion": 5, "inventory": {"sections": {}, "basics": basics}})
+    expect("old record unchecked", status.field_view(old["inventory"]["basics"], "github")["level"], "unchecked")
+
+    ok = not problems
+    print(
+        f"contact_status_and_gate: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_contact_on_save_and_privacy() -> bool:
+    from context_selector import resume_context_summary, select_resume_context
+    from contact import status
+    from resume_ops import intake_context, update_basics
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    def raises(call) -> str:
+        try:
+            call()
+        except ValueError as exc:
+            return str(exc)
+        return ""
+
+    base = normalize_payload(load_raw_fixture("sample_career.json"))
+    details = {
+        "fullName": "Sam Example",
+        "email": "sam@example.com",
+        "phone": "+44 20 7946 0958",
+        "location": "12 Secret Street, London",
+    }
+
+    saved = update_basics(base, details, github="sam", linkedin="in/sam", verify=True)
+    basics = saved["inventory"]["basics"]
+    expect("checks stored on save", sorted(basics["contactChecks"]), ["email", "github", "linkedin", "phone"])
+    expect("gate open", status.gate(basics)["blocked"], False)
+    expect("verified", saved["intake"]["basicsVerified"], True)
+
+    # A held "exists" result survives a re-save of an unchanged field.
+    held = status.record_check(
+        basics, "github", {"status": "ok", "message": ""},
+        {"status": "exists", "message": "This GitHub account exists."},
+    )
+    resaved = update_basics(
+        {**saved, "inventory": {**saved["inventory"], "basics": held}},
+        {**details, "email": "other@example.com"},
+        github="sam",
+        linkedin="in/sam",
+    )
+    new_basics = resaved["inventory"]["basics"]
+    expect("unchanged field keeps lookup", status.field_view(new_basics, "github")["level"], "exists")
+    expect("edited field re-checked", new_basics["contactChecks"]["email"]["fingerprint"], status.fingerprint("other@example.com"))
+    expect("edited field not exists", status.field_view(new_basics, "email")["level"], "looks_right")
+    # Editing the GitHub name drops its held result.
+    renamed = update_basics(
+        {**saved, "inventory": {**saved["inventory"], "basics": held}},
+        details, github="sam2", linkedin="in/sam",
+    )
+    expect("renamed github reset", status.field_view(renamed["inventory"]["basics"], "github")["level"], "looks_right")
+
+    # Portfolio is stored as a "Portfolio" link and checked like the others.
+    with_site = update_basics(base, details, portfolio="sam.dev/work", verify=True)
+    site_basics = with_site["inventory"]["basics"]
+    expect("portfolio normalised", status.field_value(site_basics, "portfolio"), "https://sam.dev/work")
+    expect("portfolio checked", "portfolio" in site_basics["contactChecks"], True)
+    expect("portfolio left alone when not sent", status.field_value(
+        update_basics(with_site, details)["inventory"]["basics"], "portfolio"), "https://sam.dev/work")
+    expect("portfolio cleared when sent empty", status.field_value(
+        update_basics(with_site, details, portfolio="")["inventory"]["basics"], "portfolio"), "")
+    local = raises(lambda: update_basics(base, details, portfolio="http://localhost", verify=True))
+    expect("localhost portfolio blocks confirm", "portfolio" in local, True)
+
+    # The gate stops confirmation, not saving, for plainly broken fields.
+    message = raises(lambda: update_basics(base, details, github="-bad-", verify=True))
+    expect("broken github blocks confirm", "github" in message, True)
+    draft = update_basics(base, details, github="-bad-", verify=False)
+    expect("broken github can be saved as draft", draft["intake"]["basicsVerified"], False)
+    expect("email without @ still refused", raises(lambda: update_basics(base, {**details, "email": "nope"})), "email must contain @")
+    # Warnings never block.
+    typo = update_basics(base, {**details, "email": "sam@gmial.com"}, verify=True)
+    expect("typo does not block", typo["intake"]["basicsVerified"], True)
+    summary = status.summary(typo["inventory"]["basics"])
+    expect("summary has every field", sorted(summary["fields"]), sorted(status.FIELDS))
+    expect("summary gate open", summary["gate"]["blocked"], False)
+
+    # Contact details never reach an AI model.
+    for payload in (saved,):
+        shown = _json_text(intake_context(payload)) + _json_text(resume_context_summary(payload))
+        shown += _json_text(select_resume_context(payload, "experience", section=None))
+        for secret in ("sam@example.com", "7946", "Secret Street", "github.com/sam", "linkedin.com"):
+            if secret in shown:
+                problems.append(f"{secret!r} reached the assistant's context")
+    expect("name still given", intake_context(saved)["basics"], {"fullName": "Sam Example"})
+
+    ok = not problems
+    print(
+        f"contact_on_save_and_privacy: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_contact_background_lookups() -> bool:
+    import main
+    from contact import github, lookups, reach, status
+    from resume_ops import update_basics
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    base = normalize_payload(load_raw_fixture("sample_career.json"))
+    details = {"fullName": "Sam", "email": "sam@example.com", "phone": "+44 20 7946 0958", "location": ""}
+    saved = update_basics(base, details, github="sam", linkedin="in/sam")
+    saved_basics = saved["inventory"]["basics"]
+    saved_basics = {**saved_basics, "links": saved_basics["links"] + [{"label": "Portfolio", "url": "https://sam.dev"}]}
+    saved_basics = status.refresh_shape(saved_basics)
+    saved = {**saved, "inventory": {**saved["inventory"], "basics": saved_basics}}
+
+    calls: list[str] = []
+    open_connections = [0]
+    answers = {"email": "exists", "github": "exists", "portfolio": "unavailable"}
+
+    def fake_email(value):
+        calls.append("email")
+        if open_connections[0]:
+            problems.append("a database connection was open during a lookup")
+        return {"status": answers["email"], "message": "m"}
+
+    def fake_user(name):
+        calls.append(f"github:{name}")
+        return {"status": answers["github"], "message": "m"}
+
+    def fake_page(url):
+        calls.append(f"page:{url}")
+        return {"status": answers["portfolio"], "message": "later"}
+
+    real = (reach.check_email_domain, github.lookup_user, reach.check_page)
+    reach.check_email_domain, github.lookup_user, reach.check_page = fake_email, fake_user, fake_page
+    try:
+        results = lookups.run_lookups(saved_basics)
+        expect("fields looked up", sorted(results), ["email", "github", "portfolio"])
+        expect("linkedin and phone never looked up", [c for c in calls if "linkedin" in c], [])
+        expect("github sent only the username", "github:sam" in calls, True)
+
+        merged = lookups.apply_results(saved_basics, results)
+        expect("exists stored", status.field_view(merged, "github")["level"], "exists")
+        expect("unavailable is a warning", status.field_view(merged, "portfolio")["level"], "warning")
+
+        del calls[:]
+        again = lookups.run_lookups(merged)
+        expect("held 'exists' not re-asked, 'unavailable' retried", sorted(again), ["portfolio"])
+        del calls[:]
+        expect("force re-runs everything", sorted(lookups.run_lookups(merged, force=True)), ["email", "github", "portfolio"])
+
+        broken = update_basics(base, details, github="-bad-")["inventory"]["basics"]
+        expect("broken shape never looked up", "github" in lookups.run_lookups(broken), False)
+
+        # An edit made while the lookup ran: the old answer must be dropped.
+        edited = {**saved_basics, "links": [
+            {"label": "GitHub", "url": "https://github.com/someone-else"},
+            {"label": "Portfolio", "url": "https://sam.dev"},
+        ]}
+        landed = lookups.apply_results(edited, results)
+        expect("answer for edited field dropped", status.field_view(landed, "github")["level"], "unchecked")
+        expect("answer for unchanged field kept", status.field_view(landed, "email")["level"], "exists")
+
+        # The background task end to end, against a scripted database.
+        class Conn:
+            def __init__(self, script):
+                self.script = script
+            def __enter__(self):
+                open_connections[0] += 1
+                return self
+            def __exit__(self, *_):
+                open_connections[0] -= 1
+            def cursor(self):
+                return self.script
+            def commit(self):
+                self.script.committed = True
+
+        class Script(_FakeCursor):
+            def __init__(self, first, second):
+                super().__init__(version=5)
+                self.first, self.second, self.committed = first, second, False
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def execute(self, sql, params=()):
+                text = " ".join(sql.split())
+                if text.startswith("SELECT payload"):
+                    self.statements.append((text, params))
+                    self._row = (self.first,)
+                elif text.startswith("SELECT session_id, payload"):
+                    self.statements.append((text, params))
+                    self._row = ("sess_1", self.second, 5)
+                else:
+                    super().execute(sql, params)
+
+        def run(first, second):
+            script = Script(first, second)
+            real_connect = main.psycopg.connect
+            main.psycopg.connect = lambda *_a, **_k: Conn(script)
+            try:
+                main._run_contact_lookups("sess_1", False)
+            finally:
+                main.psycopg.connect = real_connect
+            return script
+
+        script = run(saved, saved)
+        select_for_update = [t for t, _ in script.statements if t.endswith("FOR UPDATE")]
+        expect("row locked before writing", len(select_for_update), 1)
+        door = script.ran("UPDATE resume_snapshots")
+        expect("written through the save door", len(door), 1)
+        expect("no undo copy for background checks", script.ran("INSERT INTO resume_undo"), [])
+        history = script.ran("INSERT INTO career_versions")
+        expect("history entry", history[0][4] if history else None, "Contact details checked")
+        stored_basics = json.loads(door[0][0])["inventory"]["basics"]
+        expect("stored result", status.field_view(stored_basics, "github")["level"], "exists")
+        expect("person's details untouched", stored_basics["email"], "sam@example.com")
+        expect("committed", script.committed, True)
+
+        changed_between = {**saved, "inventory": {**saved["inventory"], "basics": edited}}
+        script = run(saved, changed_between)
+        landed = json.loads(script.ran("UPDATE resume_snapshots")[0][0])["inventory"]["basics"]
+        expect("edit during lookup not overwritten", status.field_view(landed, "github")["level"], "unchecked")
+
+        # Nothing new to say: nothing is written.
+        answers["portfolio"] = "exists"
+        settled = lookups.apply_results(saved_basics, lookups.run_lookups(saved_basics))
+        done = {**saved, "inventory": {**saved["inventory"], "basics": settled}}
+        script = run(done, done)
+        expect("unchanged result writes nothing", script.ran("UPDATE resume_snapshots"), [])
+
+        # A lookup that blows up is swallowed and logged, never raised.
+        def boom(_value):
+            raise RuntimeError("outside service exploded")
+        reach.check_email_domain = boom
+        import logging
+
+        logging.disable(logging.CRITICAL)  # the failure is logged on purpose
+        try:
+            run(saved, saved)
+        except Exception as exc:
+            problems.append(f"background failure escaped: {exc!r}")
+        finally:
+            logging.disable(logging.NOTSET)
+    finally:
+        reach.check_email_domain, github.lookup_user, reach.check_page = real
+
+    ok = not problems
+    print(
+        f"contact_background_lookups: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_project_link_checks() -> bool:
+    import main
+    from contact import github, project_links, reach
+    from resume_ops import add_item, update_basics, update_item
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    base = update_basics(
+        normalize_payload(load_raw_fixture("sample_career.json")),
+        {"fullName": "Sam", "email": "sam@example.com", "phone": "", "location": ""},
+        verify=True,
+    )
+
+    def project(payload, link, name="Tool"):
+        return add_item(
+            payload, "projects",
+            {"name": name, "url": link, "bullets": ["Built it"]},
+        )
+
+    def item_of(payload, item_id):
+        return get_item_for_test(payload, "projects", item_id)
+
+    def without_checks(payload):
+        text = json.dumps(payload, sort_keys=True)
+        return re.sub(r'"linkCheck": \{[^{}]*(\[[^\]]*\])?[^{}]*\}', '"linkCheck": null', text)
+
+    # --- instant check, through the single save door ---
+    drafted, repo_id = project(base, "https://github.com/octocat/hello")
+    drafted, site_id = project(drafted, "https://sam.dev/tool", "Site")
+    drafted, bad_id = project(drafted, "not a link!", "Bad")
+    drafted, none_id = project(drafted, "", "No link")
+    cur = _FakeCursor(version=1)
+    saved = main._save_payload(
+        cur, "s", base, drafted, operations=[{"type": "TOOL", "tool": "add_item"}], summary="x"
+    )[1]
+    expect("repo link checked on save", project_links.view(item_of(saved, repo_id))["level"], "looks_right")
+    expect("broken link flagged", project_links.view(item_of(saved, bad_id))["level"], "broken")
+    expect("no link, no record", "linkCheck" in item_of(saved, none_id), False)
+    expect("record survives reload", normalize_payload(saved), saved)
+    expect("pending lookups seen", project_links.pending(saved), True)
+
+    # --- lookups pick the right check; broken, held and private links are skipped ---
+    calls: list[str] = []
+    real = (github.lookup_repo, reach.check_page)
+    github.lookup_repo = lambda url: (calls.append(f"repo:{url}") or
+        {"status": "exists", "message": "ok", "languages": ["TypeScript", "Python"]})
+    reach.check_page = lambda url: (calls.append(f"page:{url}") or
+        {"status": "not_found", "message": "The page wasn't found."})
+    try:
+        results = project_links.run_lookups(saved)
+        expect("repo and page looked up, broken skipped", sorted(calls),
+               ["page:https://sam.dev/tool", "repo:https://github.com/octocat/hello"])
+        landed = project_links.apply_results(saved, results)
+        repo_view = project_links.view(item_of(landed, repo_id))
+        expect("repo exists with languages", (repo_view["level"], repo_view["languages"]),
+               ("exists", ["TypeScript", "Python"]))
+        expect("missing page is a warning", project_links.view(item_of(landed, site_id))["level"], "warning")
+        expect("points and statuses untouched",
+               without_checks(landed), without_checks(saved))
+        expect("claims identical", landed["claims"], saved["claims"])
+        expect("facts identical", landed["facts"], saved["facts"])
+        expect("bullets identical", item_of(landed, repo_id)["bullets"], item_of(saved, repo_id)["bullets"])
+
+        del calls[:]
+        expect("held 'exists' and 'not found' not re-asked", project_links.run_lookups(landed), {})
+        expect("force re-asks both", sorted(project_links.run_lookups(landed, force=True)),
+               sorted([repo_id, site_id]))
+
+        # --- an edit while the lookup ran: the old answer is dropped ---
+        edited = update_item(saved, "projects", repo_id, {"url": "https://github.com/octocat/other"})
+        stale = project_links.apply_results(edited, results)
+        expect("answer for edited link dropped",
+               project_links.view(item_of(stale, repo_id))["level"], "unchecked")
+        resaved = main._save_payload(
+            _FakeCursor(version=2), "s", landed,
+            update_item(landed, "projects", repo_id, {"url": "https://github.com/octocat/other"}),
+            operations=[{"type": "TOOL", "tool": "update_item"}], summary="x",
+        )[1]
+        expect("edited link re-checked on save",
+               project_links.view(item_of(resaved, repo_id))["level"], "looks_right")
+        expect("unchanged link keeps its answer",
+               project_links.view(item_of(resaved, site_id))["level"], "warning")
+
+        # --- private repositories ---
+        flagged = project_links.set_private(landed, repo_id, True)
+        view = project_links.view(item_of(flagged, repo_id))
+        expect("private view", (view["level"], view["message"], view["languages"]),
+               ("private", "Private, not checked.", []))
+        expect("private never looked up",
+               repo_id in project_links.run_lookups(flagged, force=True), False)
+        expect("private survives a late answer",
+               project_links.view(item_of(project_links.apply_results(flagged, results), repo_id))["level"],
+               "private")
+        expect("unmarking asks again", repo_id in project_links.run_lookups(
+            project_links.set_private(flagged, repo_id, False)), True)
+        expect("no link cannot be private",
+               "no link" in str(_raises_text(lambda: project_links.set_private(saved, none_id, True))), True)
+        expect("unknown entry", _raises(lambda: project_links.set_private(saved, "nope", True), KeyError), True)
+    finally:
+        github.lookup_repo, reach.check_page = real
+
+    # --- the background task, against a scripted database ---
+    class Conn:
+        def __init__(self, script):
+            self.script = script
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def cursor(self):
+            return self.script
+        def commit(self):
+            self.script.committed = True
+
+    class Script(_FakeCursor):
+        def __init__(self, first, second):
+            super().__init__(version=5)
+            self.first, self.second, self.committed = first, second, False
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            return False
+        def execute(self, sql, params=()):
+            text = " ".join(sql.split())
+            if text.startswith("SELECT payload"):
+                self.statements.append((text, params))
+                self._row = (self.first,)
+            elif text.startswith("SELECT session_id, payload"):
+                self.statements.append((text, params))
+                self._row = ("s", self.second, 5)
+            else:
+                super().execute(sql, params)
+
+    real_lookup = (github.lookup_repo, reach.check_page)
+    github.lookup_repo = lambda url: {"status": "exists", "message": "ok", "languages": ["Go"]}
+    reach.check_page = lambda url: {"status": "exists", "message": "The page opens."}
+    real_connect = main.psycopg.connect
+    script = Script(saved, saved)
+    main.psycopg.connect = lambda *_a, **_k: Conn(script)
+    try:
+        main._run_link_lookups("s", False)
+    finally:
+        main.psycopg.connect = real_connect
+        github.lookup_repo, reach.check_page = real_lookup
+    door = script.ran("UPDATE resume_snapshots")
+    expect("row locked", len([t for t, _ in script.statements if t.endswith("FOR UPDATE")]), 1)
+    expect("written once through the door", len(door), 1)
+    expect("no undo copy", script.ran("INSERT INTO resume_undo"), [])
+    history = script.ran("INSERT INTO career_versions")
+    expect("history label", history[0][4] if history else None, "Project links checked")
+    if door:
+        stored = json.loads(door[0][0])
+        expect("languages stored", project_links.view(item_of(stored, repo_id))["languages"], ["Go"])
+    expect("committed", script.committed, True)
+
+    ok = not problems
+    print(
+        f"project_link_checks: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def _raises_text(call) -> str:
+    try:
+        call()
+    except Exception as exc:
+        return str(exc)
+    return ""
+
+
+def _json_text(value) -> str:
+    return json.dumps(value, default=str)
+
+
 def main() -> int:
     tests = [
+        test_contact_shape_rules,
+        test_contact_on_save_and_privacy,
+        test_contact_background_lookups,
+        test_project_link_checks,
+        test_contact_status_and_gate,
+        test_contact_exists_lookups,
+        test_safe_fetch_refuses_dangerous_links,
         test_entity_resolution,
         test_skill_delete_op,
         test_claim_verification,

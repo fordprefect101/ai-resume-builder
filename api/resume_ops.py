@@ -4,6 +4,12 @@ from datetime import datetime, timezone
 import uuid
 
 from claims import section_has_points, set_item_points
+from contact import status as contact_status
+from contact.shape import (
+    normalize_github_url,
+    normalize_linkedin_url,
+    normalize_web_url,
+)
 from section_registry import (
     BUILTIN_SECTION_ORDER,
     format_unknown_section,
@@ -46,32 +52,6 @@ def _confirmed_empty_fields(
         )
 
 
-def _github_url(value: str) -> str:
-    username = str(value or "").strip().lstrip("@")
-    if "github.com/" in username:
-        username = username.split("github.com/", 1)[1].split("/", 1)[0]
-    username = username.strip("/")
-    if not username:
-        return ""
-    return f"https://github.com/{username}"
-
-
-def _linkedin_url(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    if "linkedin.com/" in raw.lower():
-        if raw.startswith("http://") or raw.startswith("https://"):
-            return raw
-        return f"https://{raw.lstrip('/')}"
-    handle = raw.lstrip("@").strip("/")
-    if handle.lower().startswith("in/"):
-        handle = handle[3:]
-    if not handle:
-        return ""
-    return f"https://www.linkedin.com/in/{handle}"
-
-
 def _upsert_link(links: list[dict], label: str, url: str) -> list[dict]:
     kept = [
         link
@@ -89,6 +69,7 @@ def update_basics(
     *,
     github: str | None = None,
     linkedin: str | None = None,
+    portfolio: str | None = None,
     verify: bool = False,
 ) -> dict:
     """
@@ -128,15 +109,35 @@ def update_basics(
                 links.append({"label": label, "url": url})
 
     if github is not None:
-        links = _upsert_link(links, "GitHub", _github_url(github))
+        links = _upsert_link(links, "GitHub", normalize_github_url(github))
     if linkedin is not None:
-        links = _upsert_link(links, "LinkedIn", _linkedin_url(linkedin))
+        links = _upsert_link(links, "LinkedIn", normalize_linkedin_url(linkedin))
+    if portfolio is not None:
+        links = _upsert_link(links, "Portfolio", normalize_web_url(portfolio))
 
     if verify and not cleaned["fullName"]:
         raise ValueError("fullName is required to verify personal details")
 
+    new_basics = {**cleaned, "links": links}
+    stored_checks = ((payload.get("inventory") or {}).get("basics") or {}).get(
+        "contactChecks"
+    )
+    if stored_checks is not None:
+        new_basics["contactChecks"] = stored_checks
+    new_basics = contact_status.refresh_shape(new_basics)
+    if verify:
+        gate = contact_status.gate(new_basics)
+        if gate["blocked"]:
+            raise ValueError(
+                "fix before confirming: "
+                + "; ".join(
+                    f"{blocker['field']}: {blocker['message']}"
+                    for blocker in gate["blockers"]
+                )
+            )
+
     inventory = dict(payload.get("inventory") or {})
-    inventory["basics"] = {**cleaned, "links": links}
+    inventory["basics"] = new_basics
     intake = dict(payload.get("intake") or {})
     intake["basicsVerified"] = bool(verify)
     intake["basicsConfirmed"] = bool(verify)
@@ -237,7 +238,10 @@ def intake_context(payload: dict) -> dict:
     return {
         "intake": payload.get("intake") or {},
         "basicsVerified": is_basics_verified(payload),
-        "basics": inventory.get("basics") or {},
+        # Name only: email, phone, address and links never go to an AI model.
+        "basics": {
+            "fullName": str((inventory.get("basics") or {}).get("fullName") or "")
+        },
         "skills": inventory.get("skills") or [],
         "sections": {
             key: {

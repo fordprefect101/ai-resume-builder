@@ -13,6 +13,9 @@ blocks all network connections, so it cannot reach a database, a model or the in
 ## What runs today
 
 Everything lives in `run_evals.py` and uses `fixtures/sample_career.json`.
+The contact checks (shape rules, the safe link opener, lookups replayed from recorded
+answers, the gate, privacy, background lookups and project links) are described in
+`docs/CONTACT-CHECKS.md`; none of them touches the internet.
 `timing_report.py` is not a check: it summarizes the server's timing log (see `docs/SPEED.md`).
 
 ## Website render check

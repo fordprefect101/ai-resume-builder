@@ -3,20 +3,17 @@ import {
   githubHandleFromPayload,
   isBasicsVerified,
   linkedinUrlFromPayload,
+  portfolioUrlFromPayload,
+  type BasicsInput as BasicsForm,
+  type ContactField,
+  type ContactStatus,
   type ResumePayload,
 } from '../../types/resume'
-
-type BasicsForm = {
-  fullName: string
-  email: string
-  phone: string
-  location: string
-  github: string
-  linkedin: string
-}
+import type { ContactChecksState } from './useContactStatus'
 
 type Props = {
   payload: ResumePayload
+  contact: ContactChecksState
   busy: boolean
   onConfirm: (basics: BasicsForm) => void
   onDirtyChange?: (dirty: boolean) => void
@@ -31,10 +28,46 @@ function formFromPayload(payload: ResumePayload): BasicsForm {
     location: basics.location || '',
     github: githubHandleFromPayload(payload),
     linkedin: linkedinUrlFromPayload(payload),
+    portfolio: portfolioUrlFromPayload(payload),
   }
 }
 
-export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props) {
+const LEVEL_LABEL: Record<string, string> = {
+  looks_right: 'Looks right',
+  exists: 'Exists',
+  warning: 'Warning',
+  broken: 'Fix this',
+}
+
+/** The server's verdict on one field. Hidden while the field has unsaved edits. */
+function Badge({
+  status,
+  field,
+  hidden,
+}: {
+  status: ContactStatus | null
+  field: ContactField
+  hidden: boolean
+}) {
+  const result = status?.fields[field]
+  if (hidden || !result || result.level === 'empty' || result.level === 'unchecked') {
+    return null
+  }
+  return (
+    <span className={`contact-badge ${result.level}`}>
+      <strong>{LEVEL_LABEL[result.level]}</strong>
+      {result.message ? ` · ${result.message}` : ''}
+    </span>
+  )
+}
+
+export function BasicsEditor({
+  payload,
+  contact,
+  busy,
+  onConfirm,
+  onDirtyChange,
+}: Props) {
   const saved = useMemo(() => formFromPayload(payload), [payload])
   const [edited, setEdited] = useState<BasicsForm | null>(null)
   const form = edited ?? saved
@@ -45,7 +78,8 @@ export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props)
     form.phone !== saved.phone ||
     form.location !== saved.location ||
     form.github !== saved.github ||
-    form.linkedin !== saved.linkedin
+    form.linkedin !== saved.linkedin ||
+    form.portfolio !== saved.portfolio
 
   useEffect(() => {
     setEdited(null)
@@ -99,6 +133,7 @@ export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props)
             autoComplete="email"
             onChange={(event) => update('email', event.target.value)}
           />
+          <Badge status={contact.status} field="email" hidden={form.email !== saved.email} />
         </label>
         <label>
           Phone
@@ -107,6 +142,7 @@ export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props)
             autoComplete="tel"
             onChange={(event) => update('phone', event.target.value)}
           />
+          <Badge status={contact.status} field="phone" hidden={form.phone !== saved.phone} />
         </label>
         <label>
           Location
@@ -123,6 +159,11 @@ export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props)
             placeholder="linkedin.com/in/you"
             onChange={(event) => update('linkedin', event.target.value)}
           />
+          <Badge status={contact.status} field="linkedin" hidden={form.linkedin !== saved.linkedin} />
+          <span className="contact-hint">
+            LinkedIn can't be checked automatically. Open the link yourself to
+            make sure it's you.
+          </span>
         </label>
         <label>
           GitHub
@@ -131,10 +172,32 @@ export function BasicsEditor({ payload, busy, onConfirm, onDirtyChange }: Props)
             placeholder="username"
             onChange={(event) => update('github', event.target.value)}
           />
+          <Badge status={contact.status} field="github" hidden={form.github !== saved.github} />
         </label>
-        <button className="primary-action" type="submit" disabled={!ready || (verified && !dirty)}>
-          {verified && !dirty ? 'Confirmed' : 'Save and confirm'}
-        </button>
+        <label>
+          Portfolio website
+          <input
+            value={form.portfolio}
+            placeholder="yoursite.com"
+            autoComplete="url"
+            onChange={(event) => update('portfolio', event.target.value)}
+          />
+          <Badge status={contact.status} field="portfolio" hidden={form.portfolio !== saved.portfolio} />
+        </label>
+        <div className="contact-actions">
+          <button className="primary-action" type="submit" disabled={!ready || (verified && !dirty)}>
+            {verified && !dirty ? 'Confirmed' : 'Save and confirm'}
+          </button>
+          <button
+            type="button"
+            className="contact-recheck"
+            disabled={dirty || contact.checking}
+            onClick={() => void contact.recheck()}
+          >
+            {contact.checking ? 'Checking…' : 'Check again'}
+          </button>
+        </div>
+        {contact.error && <p className="contact-error">{contact.error}</p>}
       </form>
     </section>
   )

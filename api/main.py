@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -6,7 +7,7 @@ from typing import Any
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -28,6 +29,9 @@ from payload_normalize import normalize_payload
 from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
 from retrieval import retrieve_evidence
+from contact import lookups as contact_lookups
+from contact import project_links
+from contact import status as contact_status
 from traces import get_trace, log_trace
 from versions import (
     ensure_base_schema,
@@ -69,6 +73,8 @@ async def lifespan(_app: FastAPI):
     ensure_v2_schema()
     yield
 
+
+logger = logging.getLogger("contact")
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(auth_router)
@@ -170,7 +176,13 @@ class UpdateBasicsBody(BaseModel):
     location: str = ""
     github: str = ""
     linkedin: str = ""
+    portfolio: str | None = None
     verify: bool = True
+
+
+class SetLinkPrivateBody(BaseModel):
+    itemId: str
+    private: bool = True
 
 
 class SetSkillsBody(BaseModel):
@@ -216,7 +228,7 @@ def _save_payload(
     The single door for changing a stored resume: normalizes the payload, keeps
     an undo copy, bumps the version, and records a history entry.
     """
-    new_payload = normalize_payload(new_payload)
+    new_payload = project_links.refresh_payload(normalize_payload(new_payload))
     if undoable and previous is not None:
         push_undo(cur, session_id, previous)
     cur.execute(
@@ -396,8 +408,92 @@ def tool_search_context(session_id: str, body: SearchContextBody, request: Reque
     }
 
 
+def _run_background_lookups(session_id: str, lookup, merge, tool: str, summary: str) -> None:
+    """Background: run outside lookups on the saved resume, then merge the answers in.
+
+    lookup(payload) does the slow outside calls, with no database connection open.
+    merge(latest_payload, results) puts the answers into the latest saved record; it
+    keeps only answers whose field still holds the text that was checked. The write
+    happens under a row lock, through the single save door.
+    """
+    try:
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT payload FROM resume_snapshots WHERE session_id = %s",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return
+        results = lookup(normalize_payload(row[0]))
+        if not results:
+            return
+
+        with psycopg.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT session_id, payload, version FROM resume_snapshots "
+                    "WHERE session_id = %s FOR UPDATE",
+                    (session_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return
+                previous = normalize_payload(row[1])
+                merged = merge(previous, results)
+                if merged != previous:
+                    _save_payload(
+                        cur,
+                        session_id,
+                        previous,
+                        merged,
+                        operations=[{"type": "TOOL", "tool": tool}],
+                        summary=summary,
+                        undoable=False,
+                    )
+            conn.commit()
+    except Exception:
+        # A failed background check must never break anything; "Check again" retries.
+        logger.exception("%s failed for %s", tool, session_id)
+
+
+def _basics_of(payload: dict) -> dict:
+    return (payload.get("inventory") or {}).get("basics") or {}
+
+
+def _run_contact_lookups(session_id: str, force: bool) -> None:
+    def merge(latest: dict, results: dict) -> dict:
+        inventory = latest.get("inventory") or {}
+        merged = contact_lookups.apply_results(_basics_of(latest), results)
+        return {**latest, "inventory": {**inventory, "basics": merged}}
+
+    _run_background_lookups(
+        session_id,
+        lambda payload: contact_lookups.run_lookups(_basics_of(payload), force=force),
+        merge,
+        "check_contact",
+        "Contact details checked",
+    )
+
+
+def _run_link_lookups(session_id: str, force: bool) -> None:
+    _run_background_lookups(
+        session_id,
+        lambda payload: project_links.run_lookups(payload, force=force),
+        project_links.apply_results,
+        "check_project_links",
+        "Project links checked",
+    )
+
+
 @app.patch("/resume/{session_id}/basics")
-def update_resume_basics(session_id: str, body: UpdateBasicsBody, request: Request):
+def update_resume_basics(
+    session_id: str,
+    body: UpdateBasicsBody,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             row = load_snapshot(cur, session_id, get_current_user(request))
@@ -413,6 +509,7 @@ def update_resume_basics(session_id: str, body: UpdateBasicsBody, request: Reque
                     },
                     github=body.github,
                     linkedin=body.linkedin,
+                    portfolio=body.portfolio,
                     verify=body.verify,
                 )
             except ValueError as err:
@@ -428,11 +525,95 @@ def update_resume_basics(session_id: str, body: UpdateBasicsBody, request: Reque
             )
         conn.commit()
 
+    background_tasks.add_task(_run_contact_lookups, session_id, False)
     return {
         "sessionId": saved[0],
         "payload": saved[1],
         "version": saved[2],
         "basicsVerified": is_basics_verified(saved[1]),
+        "contactStatus": contact_status.summary(
+            (saved[1].get("inventory") or {}).get("basics") or {}
+        ),
+    }
+
+
+@app.post("/resume/{session_id}/basics/check")
+def recheck_contact_details(
+    session_id: str, request: Request, background_tasks: BackgroundTasks
+):
+    """"Check again": re-run every lookup, ignoring answers already held."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            load_snapshot(cur, session_id, get_current_user(request))
+    background_tasks.add_task(_run_contact_lookups, session_id, True)
+    return {"started": True}
+
+
+@app.get("/resume/{session_id}/contact-status")
+def get_contact_status(session_id: str, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+    payload = normalize_payload(row[1])
+    return {
+        "sessionId": row[0],
+        "version": row[2],
+        "contactStatus": contact_status.summary(_basics_of(payload)),
+        "projectLinks": project_links.summary(payload),
+    }
+
+
+@app.post("/resume/{session_id}/links/check")
+def recheck_project_links(
+    session_id: str, request: Request, background_tasks: BackgroundTasks
+):
+    """"Check again" for every project link."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            load_snapshot(cur, session_id, get_current_user(request))
+    background_tasks.add_task(_run_link_lookups, session_id, True)
+    return {"started": True}
+
+
+@app.post("/resume/{session_id}/tools/set_link_private")
+def tool_set_link_private(
+    session_id: str, body: SetLinkPrivateBody, request: Request
+):
+    """Mark a project's link as private ("can't be checked"), or undo that."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                require_basics_verified(previous)
+                new_payload = project_links.set_private(
+                    previous, body.itemId, body.private
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{
+                    "type": "TOOL",
+                    "tool": "set_link_private",
+                    "section": "projects",
+                    "itemId": body.itemId,
+                }],
+                summary="Project link marked private"
+                if body.private
+                else "Project link no longer marked private",
+            )
+        conn.commit()
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "projectLinks": project_links.summary(saved[1]),
     }
 
 
@@ -606,7 +787,12 @@ def tool_include_on_resume(session_id: str, body: SectionItemBody, request: Requ
 
 
 @app.post("/resume/{session_id}/tools/add_item")
-def tool_add_item(session_id: str, body: AddItemBody, request: Request):
+def tool_add_item(
+    session_id: str,
+    body: AddItemBody,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             row = load_snapshot(cur, session_id, get_current_user(request))
@@ -654,6 +840,8 @@ def tool_add_item(session_id: str, body: AddItemBody, request: Request):
             )
         conn.commit()
 
+    if project_links.pending(saved[1]):
+        background_tasks.add_task(_run_link_lookups, session_id, False)
     return {
         "sessionId": saved[0],
         "payload": saved[1],
@@ -997,7 +1185,12 @@ def tool_undo(session_id: str, request: Request):
 
 
 @app.post("/resume/{session_id}/mutate")
-def mutate_resume(session_id: str, body: MutateBody, request: Request):
+def mutate_resume(
+    session_id: str,
+    body: MutateBody,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     with psycopg.connect(DATABASE_URL) as conn:
         with conn.cursor() as cur:
             row = load_snapshot(cur, session_id, get_current_user(request))
@@ -1041,6 +1234,8 @@ def mutate_resume(session_id: str, body: MutateBody, request: Request):
             )
         conn.commit()
 
+    if project_links.pending(saved[1]):
+        background_tasks.add_task(_run_link_lookups, session_id, False)
     return {
         "sessionId": saved[0],
         "payload": saved[1],

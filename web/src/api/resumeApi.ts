@@ -1,3 +1,5 @@
+import type { BasicsInput, ContactStatus, ProjectLinks } from '../types/resume'
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8081';
 
 export { API_BASE }
@@ -115,16 +117,65 @@ export function reorderResumeItems(
   return postResumeTool(sessionId, 'reorder_items', { section, itemIds });
 }
 
+export type ContactChecks = {
+  contactStatus: ContactStatus
+  projectLinks: ProjectLinks
+}
+
+export async function fetchContactStatus(
+  sessionId: string
+): Promise<ContactChecks> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/contact-status`,
+    creds
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Contact status failed: ${res.status}`))
+  }
+  const body = (await res.json()) as Partial<ContactChecks>
+  return {
+    contactStatus: body.contactStatus as ContactStatus,
+    projectLinks: body.projectLinks ?? {},
+  }
+}
+
+/** "Check again": the server re-runs the lookups in the background. */
+export async function recheckContactDetails(sessionId: string): Promise<void> {
+  for (const path of ['basics/check', 'links/check']) {
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/${path}`,
+      { ...creds, method: 'POST' }
+    )
+    if (!res.ok) {
+      throw new Error(await apiErrorMessage(res, `Check again failed: ${res.status}`))
+    }
+  }
+}
+
+/** Mark a project's link as private ("can't be checked"), or undo that. */
+export async function setProjectLinkPrivate(
+  sessionId: string,
+  itemId: string,
+  isPrivate: boolean
+): Promise<ProjectLinks> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/set_link_private`,
+    {
+      ...creds,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId, private: isPrivate }),
+    }
+  )
+  if (!res.ok) {
+    throw new Error(await apiErrorMessage(res, `Could not update the link: ${res.status}`))
+  }
+  return ((await res.json()) as { projectLinks: ProjectLinks }).projectLinks
+}
+
 export async function updateResumeBasics(
   sessionId: string,
-  basics: {
-    fullName: string
-    email: string
-    phone: string
-    location: string
-    github: string
-    linkedin: string
-  }
+  basics: BasicsInput
 ): Promise<ResumeResponse> {
   const res = await fetch(
     `${API_BASE}/resume/${encodeURIComponent(sessionId)}/basics`,

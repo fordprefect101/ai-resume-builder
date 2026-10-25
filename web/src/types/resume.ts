@@ -144,6 +144,58 @@ export function linkedinUrlFromPayload(payload: ResumePayload): string {
   return linkUrl(payload.inventory.basics.links, ['linkedin'])
 }
 
+export function portfolioUrlFromPayload(payload: ResumePayload): string {
+  return linkUrl(payload.inventory.basics.links, ['portfolio'])
+}
+
+/** The personal details as typed in the form and sent to the server. */
+export type BasicsInput = {
+  fullName: string
+  email: string
+  phone: string
+  location: string
+  github: string
+  linkedin: string
+  portfolio: string
+}
+
+export type ContactField = 'email' | 'phone' | 'github' | 'linkedin' | 'portfolio'
+
+/**
+ * What a badge says, as decided by the server (api/contact/status.py):
+ * empty and unchecked show nothing; looks_right and exists are good;
+ * warning never blocks; broken blocks "Save and confirm".
+ */
+export type ContactLevel =
+  | 'empty'
+  | 'unchecked'
+  | 'looks_right'
+  | 'exists'
+  | 'warning'
+  | 'broken'
+
+/**
+ * A project's link, as judged by the server (api/contact/project_links.py).
+ * Information for the person only: it never changes a point and is not printed on the
+ * resume. `languages` is what GitHub reports for a public repository.
+ */
+export type ProjectLinkView = {
+  level: ContactLevel | 'private'
+  message: string
+  languages: string[]
+}
+
+/** Keyed by the project's entry ID. Only projects that have a link appear. */
+export type ProjectLinks = Record<string, ProjectLinkView>
+
+export type ContactStatus = {
+  fields: Record<ContactField, { level: ContactLevel; message: string }>
+  gate: {
+    blocked: boolean
+    blockers: Array<{ field: ContactField; message: string }>
+  }
+}
+
 /**
  * A job's projects that are not archived, in stored order. The preview and the
  * editor both use this, so they cannot disagree about what counts as active.

@@ -1,9 +1,76 @@
+import { useState } from 'react'
+import { setProjectLinkPrivate } from '../../api/resumeApi'
 import { BasicsEditor } from './BasicsEditor'
+import { useContactStatus } from './useContactStatus'
 import {
   isBasicsVerified,
+  type BasicsInput,
+  type ProjectLinkView,
   type ResumeItem,
   type ResumePayload,
 } from '../../types/resume'
+
+/**
+ * The check on one project's link: its badge, the languages GitHub reports for a
+ * public repository, and the "this one is private" choice. Information for the
+ * person only; it never changes a point and is not printed on the resume.
+ */
+function ProjectLinkLine({
+  link,
+  view,
+  checking,
+  onRecheck,
+  onPrivate,
+}: {
+  link: string
+  view: ProjectLinkView
+  checking: boolean
+  onRecheck: () => void
+  onPrivate: (isPrivate: boolean) => void
+}) {
+  const label: Record<string, string> = {
+    looks_right: 'Looks right',
+    exists: 'Exists',
+    warning: 'Warning',
+    broken: 'Fix this',
+    private: 'Private',
+  }
+  const showBadge = view.level !== 'empty' && view.level !== 'unchecked'
+  return (
+    <div className="project-link-line">
+      <small className="project-link-url">{link}</small>
+      {showBadge && (
+        <span className={`contact-badge ${view.level}`}>
+          <strong>{label[view.level]}</strong>
+          {view.message ? ` · ${view.message}` : ''}
+        </span>
+      )}
+      {view.languages.length > 0 && (
+        <small className="project-link-languages">
+          GitHub reports: {view.languages.join(', ')}
+        </small>
+      )}
+      <div className="project-link-actions">
+        <label>
+          <input
+            type="checkbox"
+            checked={view.level === 'private'}
+            onChange={(event) => onPrivate(event.target.checked)}
+          />{' '}
+          This repository is private
+        </label>
+        <button
+          type="button"
+          className="contact-recheck"
+          disabled={checking}
+          onClick={onRecheck}
+        >
+          {checking ? 'Checking…' : 'Check again'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 /**
  * Read-only list of a job's projects, active ones first and archived ones dimmed.
@@ -43,16 +110,10 @@ function ProjectList({ item }: { item: ResumeItem }) {
 
 type Props = {
   payload: ResumePayload
+  sessionId: string
   busyAction: string
   contentLocked: boolean
-  onConfirmBasics: (basics: {
-    fullName: string
-    email: string
-    phone: string
-    location: string
-    github: string
-    linkedin: string
-  }) => void
+  onConfirmBasics: (basics: BasicsInput) => void
   onBasicsDirtyChange: (dirty: boolean) => void
   onMoveSection: (section: string, direction: -1 | 1) => void
   onMoveItem: (section: string, itemId: string, direction: -1 | 1) => void
@@ -73,6 +134,7 @@ function itemLabel(section: string, item: ResumeItem): string {
 
 export function ResumeEditor({
   payload,
+  sessionId,
   busyAction,
   contentLocked,
   onConfirmBasics,
@@ -85,6 +147,24 @@ export function ResumeEditor({
   const { skills, sections } = payload.inventory
   const { includedIds, sectionOrder } = payload.resume
   const verified = isBasicsVerified(payload)
+  // Re-fetch the badges whenever the saved contact details or a project link changes.
+  const savedKey = JSON.stringify([
+    payload.inventory.basics,
+    (sections.projects?.items ?? []).map((item) => [item.id, item.url]),
+  ])
+  const contact = useContactStatus(sessionId, savedKey)
+  const [linkError, setLinkError] = useState('')
+
+  async function handlePrivate(itemId: string, isPrivate: boolean) {
+    try {
+      contact.setProjectLinks(
+        await setProjectLinkPrivate(sessionId, itemId, isPrivate)
+      )
+      setLinkError('')
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Could not update the link')
+    }
+  }
 
   return (
     <aside className="resume-editor" aria-label="Resume sections editor">
@@ -105,6 +185,7 @@ export function ResumeEditor({
 
       <BasicsEditor
         payload={payload}
+        contact={contact}
         busy={busyAction === 'basics'}
         onConfirm={onConfirmBasics}
         onDirtyChange={onBasicsDirtyChange}
@@ -215,6 +296,15 @@ export function ResumeEditor({
                           </div>
                         </div>
                         <ProjectList item={item} />
+                        {sectionKey === 'projects' && contact.projectLinks[item.id] && (
+                          <ProjectLinkLine
+                            link={String(item.url ?? '')}
+                            view={contact.projectLinks[item.id]}
+                            checking={contact.checking}
+                            onRecheck={() => void contact.recheck()}
+                            onPrivate={(isPrivate) => void handlePrivate(item.id, isPrivate)}
+                          />
+                        )}
                       </div>
                     )
                   })}
@@ -224,6 +314,7 @@ export function ResumeEditor({
           )
         })}
       </div>
+      {linkError && <p className="contact-error">{linkError}</p>}
       </div>
     </aside>
   )
