@@ -26,6 +26,7 @@ SECTION_REGISTRY: dict[str, dict] = {
         "labelFields": ["company", "title"],
         "enrich": True,
         "polishBullets": True,
+        "holdsProjects": True,
         "allowAdd": True,
         "allowExclude": True,
     },

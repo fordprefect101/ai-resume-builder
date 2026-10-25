@@ -146,6 +146,49 @@ export async function runResumeTool(
     return res.json()
   }
 
+  const projectTools: Record<string, Record<string, unknown>> = {
+    add_project: {
+      section: args.section,
+      itemId: args.itemId,
+      name: args.name,
+      technologies: args.technologies ?? [],
+      bullets: args.bullets ?? [],
+    },
+    rename_project: {
+      section: args.section,
+      itemId: args.itemId,
+      projectId: args.projectId,
+      name: args.name,
+    },
+    archive_project: {
+      section: args.section,
+      itemId: args.itemId,
+      projectId: args.projectId,
+    },
+    reorder_projects: {
+      section: args.section,
+      itemId: args.itemId,
+      projectIds: args.projectIds ?? [],
+    },
+  }
+  if (name in projectTools) {
+    // Leave section out when the assistant did not send it; the server defaults to experience.
+    const body = Object.fromEntries(
+      Object.entries(projectTools[name]).filter(([, value]) => value !== undefined)
+    )
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/${name}`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    )
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `${name} failed: ${res.status}`))
+    return res.json()
+  }
+
   throw new Error(`unknown tool: ${name}`)
 }
 

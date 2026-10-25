@@ -1,7 +1,12 @@
 export type CareerFact = {
   id: string
   content: string
-  context?: { section?: string; itemId?: string; field?: string }
+  context?: {
+    section?: string
+    itemId?: string
+    field?: string
+    projectId?: string | null
+  }
   source?: string
   kind?: string
   owner?: string
@@ -17,6 +22,7 @@ export type DerivedClaim = {
   status?: string
   section?: string
   itemId?: string
+  projectId?: string | null
   order?: number
   issues?: unknown[]
   origin?: string
@@ -44,11 +50,22 @@ export type ResumeVariant = {
   generatedClaims?: string[]
 }
 
+export type ResumeProject = {
+  id: string
+  name: string
+  status?: string
+  technologies?: string[]
+  bullets?: string[]
+  story?: StoryChunk[]
+  writing?: WritingState
+}
+
 export type ResumeItem = {
   id: string
   status?: string
   story?: StoryChunk[]
   writing?: WritingState
+  projects?: ResumeProject[]
   [key: string]: unknown
 }
 
@@ -125,6 +142,16 @@ export function githubHandleFromPayload(payload: ResumePayload): string {
 
 export function linkedinUrlFromPayload(payload: ResumePayload): string {
   return linkUrl(payload.inventory.basics.links, ['linkedin'])
+}
+
+/**
+ * A job's projects that are not archived, in stored order. The preview and the
+ * editor both use this, so they cannot disagree about what counts as active.
+ */
+export function activeProjects(item: ResumeItem): ResumeProject[] {
+  return (item.projects ?? []).filter(
+    (project) => project.id && project.status !== 'archived'
+  )
 }
 
 export function activeVariantView(payload: ResumePayload, variantId?: string | null) {

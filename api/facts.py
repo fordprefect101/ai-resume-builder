@@ -24,7 +24,11 @@ def with_fact_defaults(fact: dict) -> dict:
         "quote": None,
         "storyId": None,
     }
-    return {**fact, **{k: v for k, v in defaults.items() if k not in fact}}
+    out = {**fact, **{k: v for k, v in defaults.items() if k not in fact}}
+    context = out.get("context")
+    if isinstance(context, dict) and "projectId" not in context:
+        out["context"] = {**context, "projectId": None}
+    return out
 
 
 def ensure_facts(payload: dict) -> dict:
@@ -53,6 +57,7 @@ def add_fact(
     owner: str = "unclear",
     quote: str | None = None,
     story_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
     if kind not in FACT_KINDS:
         raise ValueError(f"unknown fact kind: {kind}")
@@ -67,6 +72,7 @@ def add_fact(
         if (
             existing.get("content") == text
             and existing.get("context", {}).get("itemId") == item_id
+            and (existing.get("context", {}).get("projectId") or None) == (project_id or None)
         ):
             return payload
     facts.append(
@@ -77,6 +83,7 @@ def add_fact(
                 "section": section,
                 "itemId": item_id,
                 "field": field,
+                "projectId": project_id or None,
             },
             "source": source,
             "createdAt": _now(),
@@ -98,12 +105,19 @@ def facts_for_item(payload: dict, section: str, item_id: str) -> list[dict]:
     ]
 
 
-def sync_facts_from_item(payload: dict, section: str, item: dict) -> dict:
-    """Extract facts from item bullets and technologies."""
+def sync_facts_from_item(
+    payload: dict, section: str, item: dict, *, project: dict | None = None
+) -> dict:
+    """
+    Extract facts from bullets and technologies: the item's own, or, when `project`
+    is given, that project's (the facts then record which project they belong to).
+    """
     item_id = item.get("id")
     if not item_id:
         return payload
-    for bullet in item.get("bullets") or []:
+    source = project if project is not None else item
+    project_id = project.get("id") if project is not None else None
+    for bullet in source.get("bullets") or []:
         if isinstance(bullet, str) and bullet.strip():
             payload = add_fact(
                 payload,
@@ -112,8 +126,9 @@ def sync_facts_from_item(payload: dict, section: str, item: dict) -> dict:
                 item_id=item_id,
                 field="bullets",
                 source="user",
+                project_id=project_id,
             )
-    for tech in item.get("technologies") or item.get("skills") or []:
+    for tech in source.get("technologies") or source.get("skills") or []:
         if isinstance(tech, str) and tech.strip():
             payload = add_fact(
                 payload,
@@ -123,6 +138,7 @@ def sync_facts_from_item(payload: dict, section: str, item: dict) -> dict:
                 field="technologies",
                 source="user",
                 kind="tool",
+                project_id=project_id,
             )
     return payload
 

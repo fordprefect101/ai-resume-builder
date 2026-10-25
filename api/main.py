@@ -54,6 +54,7 @@ from resume_ops import (
 )
 from timing import TimingMiddleware, timed
 from undo import pop_undo, push_undo
+import work_projects
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
@@ -125,6 +126,33 @@ class ReorderItemsBody(BaseModel):
 class SectionItemBody(BaseModel):
     section: str
     itemId: str
+
+
+class AddProjectBody(BaseModel):
+    section: str = "experience"
+    itemId: str
+    name: str
+    technologies: list[str] = []
+    bullets: list[str] = []
+
+
+class RenameProjectBody(BaseModel):
+    section: str = "experience"
+    itemId: str
+    projectId: str
+    name: str
+
+
+class ProjectRefBody(BaseModel):
+    section: str = "experience"
+    itemId: str
+    projectId: str
+
+
+class ReorderProjectsBody(BaseModel):
+    section: str = "experience"
+    itemId: str
+    projectIds: list[str]
 
 
 class AddItemBody(BaseModel):
@@ -717,6 +745,223 @@ def tool_reorder_items(session_id: str, body: ReorderItemsBody, request: Request
             saved[1],
             message=f"Reordered the entries in {body.section}.",
             section=body.section,
+        ),
+    }
+
+
+@app.post("/resume/{session_id}/tools/add_project")
+def tool_add_project(session_id: str, body: AddProjectBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                new_payload, project_id = work_projects.add_project(
+                    previous,
+                    body.section,
+                    body.itemId,
+                    body.name,
+                    technologies=body.technologies,
+                    bullets=body.bullets,
+                )
+                job = get_item(new_payload, body.section, body.itemId)
+                project = work_projects.get_project(
+                    new_payload, body.section, body.itemId, project_id
+                )
+                new_payload = sync_facts_from_item(
+                    new_payload, body.section, job, project=project
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[
+                    {
+                        "type": "TOOL",
+                        "tool": "add_project",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                        "projectId": project_id,
+                    }
+                ],
+                summary=f"Added a project to {body.section}",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "add_project",
+        "section": body.section,
+        "itemId": body.itemId,
+        "projectId": project_id,
+        "assistantResult": assistant_result.build(
+            "add_project",
+            saved[1],
+            message=f"Added the project {body.name.strip()}.",
+            section=body.section,
+            item_id=body.itemId,
+            project_id=project_id,
+        ),
+    }
+
+
+@app.post("/resume/{session_id}/tools/rename_project")
+def tool_rename_project(session_id: str, body: RenameProjectBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                new_payload = work_projects.rename_project(
+                    previous, body.section, body.itemId, body.projectId, body.name
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[
+                    {
+                        "type": "TOOL",
+                        "tool": "rename_project",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                        "projectId": body.projectId,
+                    }
+                ],
+                summary="Renamed a project",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "rename_project",
+        "section": body.section,
+        "itemId": body.itemId,
+        "projectId": body.projectId,
+        "assistantResult": assistant_result.build(
+            "rename_project",
+            saved[1],
+            message=f"Renamed the project to {body.name.strip()}.",
+            section=body.section,
+            item_id=body.itemId,
+            project_id=body.projectId,
+        ),
+    }
+
+
+@app.post("/resume/{session_id}/tools/archive_project")
+def tool_archive_project(session_id: str, body: ProjectRefBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                new_payload = work_projects.archive_project(
+                    previous, body.section, body.itemId, body.projectId
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[
+                    {
+                        "type": "TOOL",
+                        "tool": "archive_project",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                        "projectId": body.projectId,
+                    }
+                ],
+                summary="Archived a project",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "archive_project",
+        "section": body.section,
+        "itemId": body.itemId,
+        "projectId": body.projectId,
+        "assistantResult": assistant_result.build(
+            "archive_project",
+            saved[1],
+            message="Archived the project; its points are kept.",
+            section=body.section,
+            item_id=body.itemId,
+            project_id=body.projectId,
+        ),
+    }
+
+
+@app.post("/resume/{session_id}/tools/reorder_projects")
+def tool_reorder_projects(session_id: str, body: ReorderProjectsBody, request: Request):
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                new_payload = work_projects.reorder_projects(
+                    previous, body.section, body.itemId, body.projectIds
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[
+                    {
+                        "type": "TOOL",
+                        "tool": "reorder_projects",
+                        "section": body.section,
+                        "itemId": body.itemId,
+                    }
+                ],
+                summary="Reordered projects",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "reorder_projects",
+        "section": body.section,
+        "itemId": body.itemId,
+        "assistantResult": assistant_result.build(
+            "reorder_projects",
+            saved[1],
+            message="Reordered the projects.",
+            section=body.section,
+            item_id=body.itemId,
         ),
     }
 

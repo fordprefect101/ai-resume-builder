@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Walk through phase 1 against a real Postgres.
+Walk through phases 1 and 1c against a real Postgres.
 
 It creates a fresh, separate database (resume_builder_test) on the same server as
 DATABASE_URL in api/.env, so real data is never touched. It then starts the API
@@ -237,6 +237,81 @@ async def walkthrough(use_ai: bool, test_url: str, timing_log: Path) -> None:
         )
         check("add a second entry and a project", status == 200 and status_p == 200, f"status={status}, {status_p}")
 
+        # Projects inside the first job.
+        status, data = await request(
+            app, "POST", f"{base}/tools/add_project",
+            {"itemId": first_id, "name": "Reporting engine", "technologies": ["Python"],
+             "bullets": ["Built the weekly report generator"]},
+        )
+        project_a = data.get("projectId")
+        status_b, data_b = await request(
+            app, "POST", f"{base}/tools/add_project", {"itemId": first_id, "name": "Alerting"}
+        )
+        project_b = data_b.get("projectId")
+        status_dup, _ = await request(
+            app, "POST", f"{base}/tools/add_project", {"itemId": first_id, "name": "reporting ENGINE"}
+        )
+        job = next(
+            i for i in stored(sid)["inventory"]["sections"]["experience"]["items"] if i["id"] == first_id
+        )
+        check(
+            "add two projects to a job; a duplicate name is refused",
+            status == 200 and status_b == 200 and status_dup == 400
+            and [x["name"] for x in job["projects"]] == ["Reporting engine", "Alerting"]
+            and job["projects"][0]["bullets"] == ["Built the weekly report generator"]
+            and copies_in_step(stored(sid)),
+            f"status={status},{status_b},{status_dup}",
+        )
+
+        status, _ = await request(
+            app, "POST", f"{base}/tools/rename_project",
+            {"itemId": first_id, "projectId": project_b, "name": "Alert routing"},
+        )
+        status2, _ = await request(
+            app, "POST", f"{base}/tools/reorder_projects",
+            {"itemId": first_id, "projectIds": [project_b, project_a]},
+        )
+        job = next(
+            i for i in stored(sid)["inventory"]["sections"]["experience"]["items"] if i["id"] == first_id
+        )
+        check(
+            "rename and reorder projects",
+            status == 200 and status2 == 200
+            and [x["name"] for x in job["projects"]] == ["Alert routing", "Reporting engine"],
+            f"status={status},{status2}",
+        )
+
+        status, data = await request(
+            app, "POST", f"{base}/tools/archive_project", {"itemId": first_id, "projectId": project_a}
+        )
+        record = stored(sid)
+        job = next(i for i in record["inventory"]["sections"]["experience"]["items"] if i["id"] == first_id)
+        kept_points = [
+            c["content"] for c in record["claims"]
+            if c.get("projectId") == project_a
+        ]
+        check(
+            "archive a project; its points are kept",
+            status == 200
+            and next(x for x in job["projects"] if x["id"] == project_a)["status"] == "archived"
+            and kept_points == ["Built the weekly report generator"]
+            and data.get("assistantResult", {}).get("projectId") == project_a,
+            f"status={status}",
+        )
+
+        status, data = await request(
+            app, "POST", f"{base}/tools/search_context", {"query": "alert routing"}
+        )
+        found = [
+            (c["id"], [x["id"] for x in c.get("projects", [])])
+            for c in data.get("context", {}).get("candidates", [])
+        ]
+        check(
+            "search finds the job by its project's name and lists the project",
+            status == 200 and (first_id, [project_b]) in found,
+            str(found),
+        )
+
         status, _ = await request(
             app, "POST", f"{base}/tools/exclude_from_resume", {"section": "experience", "itemId": first_id}
         )
@@ -273,6 +348,11 @@ async def walkthrough(use_ai: bool, test_url: str, timing_log: Path) -> None:
             "Added an entry to experience",
             "Added an entry to experience",
             "Added an entry to projects",
+            "Added a project to experience",
+            "Added a project to experience",
+            "Renamed a project",
+            "Reordered projects",
+            "Archived a project",
             "Hid an entry in experience",
             "Showed an entry in experience",
             "Sections reordered",

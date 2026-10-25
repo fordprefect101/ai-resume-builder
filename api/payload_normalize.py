@@ -13,6 +13,7 @@ from claims import (
     rebuild_bullets,
     reconcile_points,
     section_has_points,
+    section_holds_projects,
 )
 from facts import ensure_facts, with_fact_defaults
 
@@ -32,7 +33,7 @@ def normalize_payload(payload: dict) -> dict:
     return _to_v5(ensure_facts(out))
 
 
-def _legacy_story(section: str, item_id: str, texts: list[str]) -> list[dict]:
+def legacy_story(section: str, item_id: str, texts: list[str]) -> list[dict]:
     seen: dict[str, int] = {}
     story = []
     for text in texts:
@@ -52,54 +53,121 @@ def _legacy_story(section: str, item_id: str, texts: list[str]) -> list[dict]:
     return story
 
 
+def blank_writing() -> dict:
+    return {"status": "idle", "questions": [], "followUpsAsked": 0}
+
+
+def _clean_projects(section: str, item_id: str, raw) -> list[dict]:
+    """
+    Projects inside a job, with a stable unique id each. Entries that are not
+    objects are dropped; an object without an id gets one derived from its
+    position and name, so the same record always normalizes to the same ids.
+    """
+    projects: list[dict] = []
+    seen: set[str] = set()
+    for index, project in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(project, dict):
+            continue
+        name = str(project.get("name") or "").strip()
+        base = str(project.get("id") or "").strip()
+        if not base:
+            digest = hashlib.sha1(f"{section}|{item_id}|{index}|{name}".encode()).hexdigest()
+            base = f"wp_{digest[:8]}"
+        pid, n = base, 2
+        while pid in seen:
+            pid, n = f"{base}_{n}", n + 1
+        seen.add(pid)
+        technologies = project.get("technologies")
+        projects.append(
+            {
+                **project,
+                "id": pid,
+                "name": name,
+                "technologies": technologies if isinstance(technologies, list) else [],
+                "status": project.get("status") or "active",
+            }
+        )
+    return projects
+
+
 def _to_v5(payload: dict) -> dict:
     """
-    Give every point-bearing item a story, a writing marker, and point records.
-    Older records: points are built from item.bullets. v5 records: points are the
-    source and item.bullets is rebuilt from them. Safe to run repeatedly.
+    Give every point-bearing item a story, a writing marker, and point records
+    (and the same for each project inside a job). Older records: points are built
+    from bullets. v5 records: points are the source and bullets is rebuilt from
+    them. Points naming a project that no longer exists move to the job level, so
+    nothing is lost. Safe to run repeatedly.
     """
     upgrading = payload.get("schemaVersion") != SCHEMA_VERSION
     inventory = dict(payload.get("inventory") or {})
     sections = dict(inventory.get("sections") or {})
     claims = payload.get("claims") or []
-    by_item: dict[tuple, list[dict]] = {}
+    by_level: dict[tuple, list[dict]] = {}
     for claim in claims:
         if is_point(claim):
-            key = (claim.get("section"), claim.get("itemId"))
-            by_item.setdefault(key, []).append(claim)
+            key = (claim.get("section"), claim.get("itemId"), claim.get("projectId") or None)
+            by_level.setdefault(key, []).append(claim)
     handled: set[tuple] = set()
     points: list[dict] = []
+
+    def by_order(group: list[dict]) -> list[dict]:
+        return sorted(group, key=lambda c: c.get("order", 0))
 
     for section, bag in sections.items():
         if not isinstance(bag, dict) or not section_has_points(section):
             continue
+        holds_projects = section_holds_projects(section)
         items = []
         for item in bag.get("items") or []:
             if not isinstance(item, dict) or not item.get("id"):
                 items.append(item)
                 continue
             item_id = item["id"]
-            existing = sorted(
-                by_item.get((section, item_id), []),
-                key=lambda c: c.get("order", 0),
-            )
-            # A v5 item with bullets but no points yet adopts its bullets.
+            handled.add((section, item_id))
+            updated = dict(item)
+
+            # Projects first, so we know which project ids are real.
+            if holds_projects:
+                projects = _clean_projects(section, item_id, item.get("projects"))
+                valid = {pr["id"] for pr in projects}
+                for pr in projects:
+                    existing = by_order(by_level.get((section, item_id, pr["id"]), []))
+                    if upgrading or not existing:
+                        texts = clean_point_texts(pr.get("bullets"))
+                    else:
+                        texts = clean_point_texts([c.get("content") for c in existing])
+                    points.extend(
+                        reconcile_points(existing, section, item_id, texts, project_id=pr["id"])
+                    )
+                    if not isinstance(pr.get("story"), list):
+                        pr["story"] = legacy_story(section, f"{item_id}/{pr['id']}", texts)
+                    if not isinstance(pr.get("writing"), dict):
+                        pr["writing"] = blank_writing()
+                updated["projects"] = projects
+            else:
+                valid = set()
+
+            # Job-level points, plus any whose project no longer exists.
+            existing = by_order(by_level.get((section, item_id, None), []))
+            orphans = [
+                c
+                for (sec, iid, pid), group in sorted(
+                    by_level.items(), key=lambda kv: str(kv[0])
+                )
+                if sec == section and iid == item_id and pid is not None and pid not in valid
+                for c in by_order(group)
+            ]
+            existing = existing + [{**c, "projectId": None} for c in orphans]
             if upgrading or not existing:
                 texts = clean_point_texts(item.get("bullets"))
             else:
-                texts = clean_point_texts([p.get("content") for p in existing])
-            handled.add((section, item_id))
+                texts = clean_point_texts([c.get("content") for c in existing])
             points.extend(reconcile_points(existing, section, item_id, texts))
 
-            updated = dict(item)
             if not isinstance(updated.get("story"), list):
-                updated["story"] = _legacy_story(section, item_id, texts)
+                updated["story"] = legacy_story(section, item_id, texts)
             if not isinstance(updated.get("writing"), dict):
-                updated["writing"] = {
-                    "status": "idle",
-                    "questions": [],
-                    "followUpsAsked": 0,
-                }
+                updated["writing"] = blank_writing()
             items.append(updated)
         sections[section] = {**bag, "items": items}
 

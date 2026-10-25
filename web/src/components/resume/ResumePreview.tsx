@@ -1,5 +1,5 @@
-import type { ResumeItem, ResumePayload } from '../../types/resume'
-import { activeVariantView } from '../../types/resume'
+import type { ResumeItem, ResumePayload, ResumeProject } from '../../types/resume'
+import { activeProjects, activeVariantView } from '../../types/resume'
 
 type Props = {
   payload: ResumePayload
@@ -40,6 +40,31 @@ function ItemHeader({
   )
 }
 
+/**
+ * A project done inside a job. A project with no points yet is left off the paper,
+ * so there is never a heading with nothing under it. Keys are positions, not text,
+ * because two points can repeat.
+ */
+function ProjectView({ project }: { project: ResumeProject }) {
+  const points = list(project.bullets)
+  if (points.length === 0) return null
+  const technologies = list(project.technologies)
+
+  return (
+    <div className="resume-project">
+      <h3 className="resume-project-heading">
+        <strong>{project.name || 'Untitled project'}</strong>
+        {technologies.length > 0 && <span>{technologies.join(' · ')}</span>}
+      </h3>
+      <ul>
+        {points.map((point, index) => (
+          <li key={index}>{point}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function ResumeItemView({
   section,
   item,
@@ -62,6 +87,9 @@ function ResumeItemView({
         {bullets.length > 0 && (
           <ul>{bullets.map((bullet) => <li key={bullet}>{bullet}</li>)}</ul>
         )}
+        {activeProjects(item).map((project) => (
+          <ProjectView key={project.id} project={project} />
+        ))}
       </article>
     )
   }

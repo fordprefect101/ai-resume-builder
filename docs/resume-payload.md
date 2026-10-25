@@ -6,6 +6,8 @@ Stored in `resume_snapshots.payload`. Example: `api/resume-schema.example.json` 
 
 **V5 adds:** for every experience and project item, a `story` (the person's own words), a `writing` progress marker, and **point** records in `claims[]`. Facts and points gain labels. `item.bullets` becomes a display copy of the points.
 
+**Projects inside a job (v5):** an experience item may hold named `projects[]`, each with its own story, writing marker and points. Points gain a `projectId` (empty = the job's own point). See [Projects inside a job](#projects-inside-a-job).
+
 **V4 added:** `facts[]`, `claims[]`, `variants{}`.
 
 Older payloads (v2, v3, v4) are upgraded to v5 on read by `api/payload_normalize.py`. Do not write older shapes.
@@ -80,7 +82,9 @@ Sections whose registry profile has `polishBullets: true` carry points. Their it
 |-------|------|-------|
 | `story` | object[] | The person's own words for this item. See below |
 | `writing` | object | Progress of point writing for this item. See below |
-| `bullets` | string[] | **Display copy** of the item's points, in order. Never write it directly |
+| `bullets` | string[] | **Display copy** of the item's own (job-level) points, in order. Never write it directly |
+
+Sections whose registry profile also has `holdsProjects: true` (only `experience`) may hold `projects[]` too; see [Projects inside a job](#projects-inside-a-job).
 
 `story[]` entries:
 
@@ -112,9 +116,34 @@ Sections whose registry profile has `polishBullets: true` carry points. Their it
 | `bullets` | string[] | yes (display copy) |
 | `story` | object[] | yes (`[]` OK) |
 | `writing` | object | yes |
+| `projects` | object[] | yes (`[]` OK). Projects done inside this job; see below |
 | `categories` | string[] | yes (`[]` OK) |
 | `skills` | string[] | yes (`[]` OK) |
 | `status` | string | yes |
+
+### Projects inside a job
+
+A named piece of work done inside a job (for example "Recommendation engine" inside the ChaiShots job). Independent and group projects stay in the `projects` section; only `experience` items hold `projects[]`.
+
+`experience.items[].projects[]`:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | string | Stable, unique within the job (`wp_…`). Created ids are random; an entry missing one gets `wp_` plus a hash of its position and name, so the same record always normalizes the same way |
+| `name` | string | Required, at most 120 characters, unique among the job's active projects (ignoring capitals and spaces) |
+| `technologies` | string[] | Cleaned: trimmed, de-duplicated, at most 20 |
+| `status` | `"active"` \| `"archived"` | Archiving hides a project; its points, facts and story are kept |
+| `story` | object[] | Same shape as an item's story |
+| `writing` | object | Same shape as an item's `writing` |
+| `bullets` | string[] | **Display copy** of this project's points. Never write it directly |
+
+Rules:
+- **Order** is the stored order of `projects[]`; archived projects come after the active ones.
+- **Points** are in `claims[]` with `projectId` set to the project's id. A job's own points have an empty `projectId`; its `bullets` copy holds only those.
+- **Operations** live in `api/work_projects.py` (`add_project`, `rename_project`, `archive_project`, `reorder_projects`) and are reached through the `add_project`, `rename_project`, `archive_project` and `reorder_projects` voice and chat tools. They save through the single save door and make no AI calls.
+- **Search** matches a job by its active projects' names, technologies and points, and lists those projects (id and name) so the assistant can refer to one.
+- **Normalizing** gives every experience item a `projects` list (empty for existing data). A project entry that is not an object is dropped; a missing or repeated id is repaired; points naming a project that no longer exists move to the job level, so no point is ever lost.
+- **Display:** the preview shows each active project with at least one point under its job; the editor lists every project (archived ones dimmed).
 
 ### `sections.projects.items[]`
 
@@ -163,7 +192,7 @@ Sections whose registry profile has `polishBullets: true` carry points. Their it
 |-------|------|-------|
 | `id` | string | Stable |
 | `content` | string | The statement |
-| `context` | `{ section, itemId, field }` | The item it belongs to |
+| `context` | `{ section, itemId, field, projectId }` | The item it belongs to; `projectId` is empty unless the fact came from a project inside a job |
 | `source` | string | e.g. `user` |
 | `createdAt` | string | ISO timestamp |
 | `kind` | string | `context`, `action`, `tool`, `result`, `scale`, or `unsorted` |
@@ -173,13 +202,13 @@ Sections whose registry profile has `polishBullets: true` carry points. Their it
 
 `add_fact` refuses an unknown `kind` or `owner`. On read, facts missing these labels get defaults without guessing: `kind` is `tool` when `context.field` is `technologies`, otherwise `unsorted`; `owner` is `unclear`; `quote` and `storyId` are `null`.
 
-Today facts are still derived from bullets and technologies (`sync_facts_from_item`). `quote` and `storyId` stay `null` until facts are extracted from stories.
+Today facts are still derived from bullets and technologies (`sync_facts_from_item`, which also takes a project). The same sentence at the job level and in a project is two facts. `quote` and `storyId` stay `null` until facts are extracted from stories.
 
 ## Claims and points
 
 `claims[]` holds two kinds of record. Helpers: `api/claims.py`.
 
-- A **point** has an `itemId`. It is one bullet of one item.
+- A **point** has an `itemId`. It is one bullet of one item, or, when `projectId` is set, one bullet of one project inside that item.
 - A **generated claim** has no `itemId` (created by the parked job-analysis flow; may carry `variantId`).
 
 Point fields:
@@ -191,7 +220,8 @@ Point fields:
 | `supportedBy` | string[] | Fact ids backing it (`[]` until checked) |
 | `section` | string | Section key of its item |
 | `itemId` | string | Its item |
-| `order` | number | Position within the item, from 0 |
+| `projectId` | string \| null | The project inside that item, or `null` for the item's own point |
+| `order` | number | Position within its level (the item's own points, or one project's), from 0 |
 | `status` | string | `unchecked`, `supported`, `needs_review`, or `user_edited` |
 | `issues` | array | Problems found with it (`[]` OK) |
 | `origin` | string | `legacy`, `ai`, `user`, or `imported` |
@@ -200,8 +230,9 @@ Point fields:
 
 ### Points are the source; `bullets` is a copy
 
-- Change an item's points only through `set_item_points(payload, section, item_id, texts)`. It keeps the id and labels of any point whose text is unchanged, creates points for new text, drops the rest, and refreshes that item's `bullets`.
-- `rebuild_bullets` is the only code that writes `item.bullets`.
+- Change points only through `set_item_points(payload, section, item_id, texts, project_id=None)`. It works on one level at a time: the item's own points, or one project's. It keeps the id and labels of any point whose text is unchanged, creates points for new text, drops the rest, and refreshes that item's `bullets` copies. An unknown project is refused.
+- A point's id is a fingerprint of its section, item, position and text, plus the project only when one is set, so job-level points kept the ids they had before projects existed.
+- `rebuild_bullets` is the only code that writes `bullets`, on items and on projects.
 - Blank or non-string texts are dropped.
 
 ## `resume` (view)
@@ -231,7 +262,8 @@ Example: `includedIds.projects = ["proj_music"]`. Soft hide = remove that id fro
 |------------------|------------------------|
 | v2, v3, v4 (includes PDF imports and old undo/version snapshots) | Points are built from each item's `bullets`; each bullet also becomes a `legacy` story entry |
 | v5 | `bullets` is rebuilt from the points |
-| v5 item with `bullets` but no points | The item adopts its `bullets` as points |
+| v5 item (or project) with `bullets` but no points | It adopts its `bullets` as points |
+| v5 points naming a project that no longer exists | They move to the job level (`projectId` cleared, id and labels kept) |
 
 Ids created during an upgrade are derived from the item id and text, so the same payload always upgrades to the same result.
 

@@ -37,6 +37,9 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "achievements. For each item, gather every intake field one at a time. "
             "Keep gathering bullets until the user says they are done. Confirm every "
             "blank optional field before calling add_item, and call add_item once per item. "
+            "When the user describes a distinct piece of work done inside a job, save it "
+            "with add_project using that job's itemId (from add_item's result); work done "
+            "on their own belongs in the projects section with add_item. "
             "If the user has nothing for an entire section, explicitly confirm the skip. "
             "Call complete_intake only after skills and all four sections were "
             "addressed; pass every confirmed skipped section. Do not invent facts. "
@@ -57,6 +60,10 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "If reordering sections, call reorder_sections with the full sectionOrder. "
             "If reordering items inside a section, call reorder_items with that "
             "section and the full itemIds list. "
+            "Projects done inside a job are changed with add_project, rename_project, "
+            "archive_project and reorder_projects, using the job's itemId and the "
+            "projectId that search_resume_context returns. reorder_projects needs every "
+            "active projectId of that job. Archiving keeps a project's points. "
             "Prefer soft exclude over deletion."
         )
 

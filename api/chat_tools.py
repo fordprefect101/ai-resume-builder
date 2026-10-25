@@ -14,7 +14,9 @@ from resume_ops import (
     validate_intake_item_fields,
 )
 from enrichment import enrich_section_item
+from facts import sync_facts_from_item
 from timing import timed
+import work_projects
 from context_selector import select_resume_context
 
 # Re-export for callers that import catalogs from chat_tools
@@ -149,6 +151,91 @@ TOOL_DEFINITIONS = [
     },
 ]
 
+_JOB_REF = {
+    "section": {
+        "type": "string",
+        "description": "The section holding the job. Almost always experience.",
+    },
+    "itemId": {
+        "type": "string",
+        "description": "The id of the JOB the project belongs to (not the project's own id).",
+    },
+}
+
+ADD_PROJECT_TOOL = {
+    "type": "function",
+    "name": "add_project",
+    "description": (
+        "Add a named project that was done inside a job (for example a recommendation "
+        "engine built at ChaiShots). Use this for work that belongs to a job; projects "
+        "done on your own go in the projects section with add_item. Optional technologies "
+        "and first points are saved as the person said them."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            **_JOB_REF,
+            "name": {"type": "string", "description": "A short name, at most 120 characters."},
+            "technologies": {"type": "array", "items": {"type": "string"}},
+            "bullets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "What the person said they did, in their own words.",
+            },
+        },
+        "required": ["itemId", "name"],
+        "additionalProperties": False,
+    },
+}
+
+EDIT_PROJECT_TOOLS = [
+    {
+        "type": "function",
+        "name": "rename_project",
+        "description": "Rename a project inside a job. Find its projectId with search_resume_context.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                **_JOB_REF,
+                "projectId": {"type": "string"},
+                "name": {"type": "string"},
+            },
+            "required": ["itemId", "projectId", "name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "archive_project",
+        "description": (
+            "Hide a project inside a job. Its points are kept, not deleted. "
+            "Find its projectId with search_resume_context."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {**_JOB_REF, "projectId": {"type": "string"}},
+            "required": ["itemId", "projectId"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "reorder_projects",
+        "description": (
+            "Put a job's active projects in a new order. Pass every active project id of that job."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                **_JOB_REF,
+                "projectIds": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["itemId", "projectIds"],
+            "additionalProperties": False,
+        },
+    },
+]
+
 SET_SKILLS_TOOL = {
     "type": "function",
     "name": "set_skills",
@@ -186,9 +273,12 @@ COMPLETE_INTAKE_TOOL = {
     },
 }
 
+TOOL_DEFINITIONS.extend([ADD_PROJECT_TOOL, *EDIT_PROJECT_TOOLS])
+
 INTAKE_TOOL_DEFINITIONS = [
     SET_SKILLS_TOOL,
     TOOL_DEFINITIONS[2],
+    ADD_PROJECT_TOOL,
     COMPLETE_INTAKE_TOOL,
 ]
 
@@ -296,5 +386,41 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
                 for item in new_payload["inventory"]["sections"][section]["items"]
             ],
         }
+
+    if name == "add_project":
+        section = arguments.get("section") or "experience"
+        new_payload, project_id = work_projects.add_project(
+            payload,
+            section,
+            arguments["itemId"],
+            arguments["name"],
+            technologies=arguments.get("technologies"),
+            bullets=arguments.get("bullets"),
+        )
+        job = get_item(new_payload, section, arguments["itemId"])
+        project = work_projects.get_project(new_payload, section, arguments["itemId"], project_id)
+        new_payload = sync_facts_from_item(new_payload, section, job, project=project)
+        return new_payload, {"ok": True, "section": section, "itemId": arguments["itemId"], "projectId": project_id}
+
+    if name == "rename_project":
+        section = arguments.get("section") or "experience"
+        new_payload = work_projects.rename_project(
+            payload, section, arguments["itemId"], arguments["projectId"], arguments["name"]
+        )
+        return new_payload, {"ok": True, "section": section, "projectId": arguments["projectId"]}
+
+    if name == "archive_project":
+        section = arguments.get("section") or "experience"
+        new_payload = work_projects.archive_project(
+            payload, section, arguments["itemId"], arguments["projectId"]
+        )
+        return new_payload, {"ok": True, "section": section, "projectId": arguments["projectId"]}
+
+    if name == "reorder_projects":
+        section = arguments.get("section") or "experience"
+        new_payload = work_projects.reorder_projects(
+            payload, section, arguments["itemId"], arguments["projectIds"]
+        )
+        return new_payload, {"ok": True, "section": section, "itemId": arguments["itemId"]}
 
     raise ValueError(f"unknown tool: {name}")

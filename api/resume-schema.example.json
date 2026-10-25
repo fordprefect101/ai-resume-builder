@@ -43,6 +43,33 @@
             "bullets": [
               "Built an internal API used by the product team daily."
             ],
+            "projects": [
+              {
+                "id": "wp_example",
+                "name": "Reporting service",
+                "technologies": [
+                  "Python",
+                  "PostgreSQL"
+                ],
+                "bullets": [
+                  "Built the weekly report generator for the support team."
+                ],
+                "status": "active",
+                "story": [
+                  {
+                    "id": "story_611c1dad3b",
+                    "text": "Built the weekly report generator for the support team.",
+                    "source": "legacy",
+                    "at": null
+                  }
+                ],
+                "writing": {
+                  "status": "idle",
+                  "questions": [],
+                  "followUpsAsked": 0
+                }
+              }
+            ],
             "categories": [
               "software-engineering",
               "backend"
@@ -164,6 +191,18 @@
   "facts": [],
   "claims": [
     {
+      "id": "pt_c6be43f37f",
+      "content": "Built the weekly report generator for the support team.",
+      "supportedBy": [],
+      "section": "experience",
+      "itemId": "exp_chaishots",
+      "projectId": "wp_example",
+      "order": 0,
+      "status": "unchecked",
+      "issues": [],
+      "origin": "legacy"
+    },
+    {
       "id": "pt_d155185d00",
       "content": "Built an internal API used by the product team daily.",
       "supportedBy": [],
@@ -172,7 +211,8 @@
       "order": 0,
       "status": "unchecked",
       "issues": [],
-      "origin": "legacy"
+      "origin": "legacy",
+      "projectId": null
     },
     {
       "id": "pt_cbf00c2c8b",
@@ -183,7 +223,8 @@
       "order": 0,
       "status": "unchecked",
       "issues": [],
-      "origin": "legacy"
+      "origin": "legacy",
+      "projectId": null
     }
   ],
   "variants": {}

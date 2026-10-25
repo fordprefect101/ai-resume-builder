@@ -5,6 +5,42 @@ import {
   type ResumePayload,
 } from '../../types/resume'
 
+/**
+ * Read-only list of a job's projects, active ones first and archived ones dimmed.
+ * Projects are added, renamed, archived and reordered by voice for now.
+ */
+function ProjectList({ item }: { item: ResumeItem }) {
+  const projects = item.projects ?? []
+  if (projects.length === 0) return null
+  const active = projects.filter((project) => project.status !== 'archived')
+  const archived = projects.filter((project) => project.status === 'archived')
+
+  return (
+    <ul className="editor-projects" aria-label="Projects in this job">
+      {[...active, ...archived].map((project) => {
+        const points = (project.bullets ?? []).length
+        const isArchived = project.status === 'archived'
+        const technologies = (project.technologies ?? []).join(' · ')
+        return (
+          <li
+            key={project.id}
+            className={isArchived ? 'editor-project archived' : 'editor-project'}
+          >
+            <strong>{project.name || 'Untitled project'}</strong>
+            <small>
+              {isArchived ? 'Archived · ' : ''}
+              {points === 0
+                ? 'no points yet'
+                : `${points} point${points === 1 ? '' : 's'}`}
+              {technologies ? ` · ${technologies}` : ''}
+            </small>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 type Props = {
   payload: ResumePayload
   busyAction: string
@@ -137,45 +173,48 @@ export function ResumeEditor({
                     const isIncluded = included.has(item.id)
                     const actionKey = `${sectionKey}:${item.id}`
                     return (
-                      <div className="editor-item" key={item.id}>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={isIncluded}
-                            disabled={busyAction === actionKey}
-                            onChange={() =>
-                              onToggleItem(sectionKey, item.id, isIncluded)
-                            }
-                          />
-                          <span>
-                            <strong>{itemLabel(sectionKey, item)}</strong>
-                            <small>{isIncluded ? 'Shown on resume' : 'Hidden'}</small>
-                          </span>
-                        </label>
-                        <div
-                          className="order-buttons"
-                          aria-label={`Reorder ${itemLabel(sectionKey, item)}`}
-                        >
-                          <button
-                            type="button"
-                            aria-label="Move item up"
-                            disabled={itemIndex === 0 || Boolean(busyAction)}
-                            onClick={() => onMoveItem(sectionKey, item.id, -1)}
+                      <div className="editor-item-block" key={item.id}>
+                        <div className="editor-item">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={isIncluded}
+                              disabled={busyAction === actionKey}
+                              onChange={() =>
+                                onToggleItem(sectionKey, item.id, isIncluded)
+                              }
+                            />
+                            <span>
+                              <strong>{itemLabel(sectionKey, item)}</strong>
+                              <small>{isIncluded ? 'Shown on resume' : 'Hidden'}</small>
+                            </span>
+                          </label>
+                          <div
+                            className="order-buttons"
+                            aria-label={`Reorder ${itemLabel(sectionKey, item)}`}
                           >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Move item down"
-                            disabled={
-                              itemIndex === section.items.length - 1 ||
-                              Boolean(busyAction)
-                            }
-                            onClick={() => onMoveItem(sectionKey, item.id, 1)}
-                          >
-                            ↓
-                          </button>
+                            <button
+                              type="button"
+                              aria-label="Move item up"
+                              disabled={itemIndex === 0 || Boolean(busyAction)}
+                              onClick={() => onMoveItem(sectionKey, item.id, -1)}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Move item down"
+                              disabled={
+                                itemIndex === section.items.length - 1 ||
+                                Boolean(busyAction)
+                              }
+                              onClick={() => onMoveItem(sectionKey, item.id, 1)}
+                            >
+                              ↓
+                            </button>
+                          </div>
                         </div>
+                        <ProjectList item={item} />
                       </div>
                     )
                   })}

@@ -12,8 +12,10 @@ Fields (always present unless noted):
     message    one plain sentence, at most MESSAGE_CAP characters
     section    the section touched (when there is one)
     itemId     the entry touched or created (when there is one)
+    projectId  the project inside that entry (when there is one)
     progress   {"setupComplete", "detailsConfirmed", "skills", "sections": {key: count}}
-    candidates (search only) at most CANDIDATE_CAP short entries
+    candidates (search only) at most CANDIDATE_CAP short entries, each listing at
+               most PROJECT_CAP of its projects as {"projectId", "name"}
     ambiguous  (search only) true when several candidates match about equally
     error      (failures only) what went wrong
 """
@@ -23,6 +25,7 @@ from __future__ import annotations
 MESSAGE_CAP = 200
 FIELD_CAP = 80
 CANDIDATE_CAP = 6
+PROJECT_CAP = 4
 
 LABEL_FIELDS = ("company", "title", "name", "institution", "degree")
 
@@ -56,6 +59,7 @@ def build(
     message: str,
     section: str | None = None,
     item_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
     result: dict = {
         "ok": True,
@@ -67,6 +71,8 @@ def build(
         result["section"] = _cut(section)
     if item_id:
         result["itemId"] = _cut(item_id)
+    if project_id:
+        result["projectId"] = _cut(project_id)
     return result
 
 
@@ -86,6 +92,13 @@ def from_search(payload: dict, context: dict) -> dict:
         for field in LABEL_FIELDS:
             if candidate.get(field):
                 short[field] = _cut(candidate[field])
+        projects = [
+            {"projectId": _cut(p.get("id")), "name": _cut(p.get("name"))}
+            for p in (candidate.get("projects") or [])[:PROJECT_CAP]
+            if isinstance(p, dict) and p.get("id")
+        ]
+        if projects:
+            short["projects"] = projects
         candidates.append(short)
     found = len(candidates)
     result = build(

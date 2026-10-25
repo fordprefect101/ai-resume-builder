@@ -49,13 +49,14 @@ resume) goes to the screen only. Built in `api/assistant_result.py`; applied by
 | `ok` | The action worked |
 | `tool` | The action's name |
 | `message` | One plain sentence, at most 200 characters |
-| `section`, `itemId` | The section and entry touched or created, when there is one |
+| `section`, `itemId`, `projectId` | The section, entry and project touched or created, when there is one |
 | `progress` | `setupComplete`, `detailsConfirmed`, `skills` (a count) and `sections` (a count per section). Counts only, never lists of ids |
-| `candidates`, `ambiguous` | Search only: at most 6 short matches (section, itemId, onResume and a label), and whether several match about equally |
+| `candidates`, `ambiguous` | Search only: at most 6 short matches (section, itemId, onResume, a label, and at most 4 of its active projects as `{projectId, name}`), and whether several match about equally |
 | `error` | Failures only |
 
 Actions covered: add_item, set_skills, complete_intake, exclude_from_resume,
-include_on_resume, reorder_sections, reorder_items, search_resume_context.
+include_on_resume, reorder_sections, reorder_items, search_resume_context, add_project,
+rename_project, archive_project, reorder_projects. None of the project actions calls an AI model.
 
 Measured on generated resumes through the real server code (characters):
 

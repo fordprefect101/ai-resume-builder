@@ -34,7 +34,7 @@ _block_network()
 
 from context_selector import select_resume_context
 from claim_verify import verify_claim
-from claims import new_point, points_for_item
+from claims import new_point, points_for_item, set_item_points
 from facts import add_fact, fact_by_id, sync_facts_from_item
 from payload_normalize import normalize_payload
 from op_validator import validate_operations
@@ -59,13 +59,20 @@ def _point_items(payload: dict):
 
 
 def _copies_out_of_step(payload: dict) -> list[str]:
-    """Items whose bullets (display copy) differ from their point records."""
-    return [
-        item["id"]
-        for section, item in _point_items(payload)
-        if item.get("bullets")
-        != [p["content"] for p in points_for_item(payload, section, item["id"])]
-    ]
+    """Items (and projects) whose bullets copy differs from their point records."""
+    bad = []
+    for section, item in _point_items(payload):
+        job = [p["content"] for p in points_for_item(payload, section, item["id"])]
+        if item.get("bullets") != job:
+            bad.append(item["id"])
+        for project in item.get("projects") or []:
+            own = [
+                p["content"]
+                for p in points_for_item(payload, section, item["id"], project["id"])
+            ]
+            if project.get("bullets") != own:
+                bad.append(f"{item['id']}/{project['id']}")
+    return bad
 
 
 def test_entity_resolution() -> bool:
@@ -735,6 +742,10 @@ def _resume_with_jobs(jobs: int, points_each: int) -> dict:
         }
         for n in range(jobs)
     ]
+    items[0]["projects"] = [
+        {"id": "wp_a", "name": "Alpha service", "bullets": ["Built the alpha service"]},
+        {"id": "wp_b", "name": "Beta pipeline", "bullets": ["Built the beta pipeline"]},
+    ]
     raw["inventory"]["sections"]["experience"]["items"] = items
     raw["resume"]["includedIds"]["experience"] = [i["id"] for i in items]
     raw["facts"] = []
@@ -809,6 +820,26 @@ def _voice_replies(
                 ),
                 request=None,
             ),
+            "add_project": lambda: main.tool_add_project(
+                "s",
+                main.AddProjectBody(
+                    itemId="exp_0", name="Gamma tool", technologies=["Go"], bullets=["Built gamma"]
+                ),
+                request=None,
+            ),
+            "rename_project": lambda: main.tool_rename_project(
+                "s",
+                main.RenameProjectBody(itemId="exp_0", projectId="wp_a", name="Alpha renamed"),
+                request=None,
+            ),
+            "archive_project": lambda: main.tool_archive_project(
+                "s", main.ProjectRefBody(itemId="exp_0", projectId="wp_a"), request=None
+            ),
+            "reorder_projects": lambda: main.tool_reorder_projects(
+                "s",
+                main.ReorderProjectsBody(itemId="exp_0", projectIds=["wp_b", "wp_a"]),
+                request=None,
+            ),
             "search_resume_context": lambda: main.tool_search_context(
                 "s", main.SearchContextBody(query="Company 1 Software Engineer"), request=None
             ),
@@ -836,6 +867,7 @@ def test_assistant_result_is_small_and_constant() -> bool:
     expected_tools = {
         "add_item", "set_skills", "complete_intake", "exclude_from_resume", "include_on_resume",
         "reorder_sections", "reorder_items", "search_resume_context",
+        "add_project", "rename_project", "archive_project", "reorder_projects",
     }
     if set(small) != expected_tools:
         problems.append(f"actions covered={sorted(small)}")
@@ -896,7 +928,7 @@ def test_assistant_result_is_small_and_constant() -> bool:
 LIVE_AI_ALLOWED = {"add_item": {"enrichment"}}
 
 ASSISTANT_RESULT_FIELDS = {
-    "ok", "tool", "message", "section", "itemId", "progress",
+    "ok", "tool", "message", "section", "itemId", "projectId", "progress",
     "candidates", "ambiguous", "error",
 }
 
@@ -1013,6 +1045,380 @@ def test_live_path_guard() -> bool:
     return ok
 
 
+def test_projects_upgrade_changes_nothing() -> bool:
+    """Existing records gain empty projects and keep every point, id and copy."""
+    import hashlib
+
+    raw = load_raw_fixture("sample_career.json")
+    payload = normalize_payload(raw)
+    problems = []
+    checked = 0
+    for section, item in _point_items(payload):
+        if section == "experience":
+            if item.get("projects") != []:
+                problems.append(f"{item['id']}: projects={item.get('projects')}")
+        elif "projects" in item:
+            problems.append(f"{item['id']}: an independent project gained a projects list")
+        before = next(
+            i for i in raw["inventory"]["sections"][section]["items"] if i["id"] == item["id"]
+        )["bullets"]
+        if item["bullets"] != before:
+            problems.append(f"{item['id']}: bullets changed")
+        for occurrence, text in enumerate(before):
+            # The id formula as it was before projects existed.
+            expected = "pt_" + hashlib.sha1(
+                f"{section}|{item['id']}|{occurrence}|{text}".encode()
+            ).hexdigest()[:10]
+            point = next(
+                (p for p in points_for_item(payload, section, item["id"]) if p["content"] == text),
+                None,
+            )
+            checked += 1
+            if not point or point["id"] != expected or point.get("projectId") is not None:
+                problems.append(f"{item['id']}: point id or projectId changed for {text!r}")
+    if normalize_payload(json.loads(json.dumps(payload))) != payload:
+        problems.append("second upgrade changed the record")
+    ok = not problems and checked > 0
+    print(
+        f"projects_upgrade_changes_nothing: {'PASS' if ok else 'FAIL'} "
+        f"(points checked={checked}, problems={problems})"
+    )
+    return ok
+
+
+def _with_project(payload: dict) -> dict:
+    """The sample resume with one project inside the ChaiShots job, normalized."""
+    payload = json.loads(json.dumps(payload))
+    job = next(
+        i for i in payload["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots"
+    )
+    job["projects"] = [{"id": "wp_rec", "name": "Recommendation engine"}]
+    return normalize_payload(payload)
+
+
+def test_project_points_stay_separate() -> bool:
+    payload = _with_project(load_fixture("sample_career.json"))
+    problems = []
+    job_points = [p["content"] for p in points_for_item(payload, "experience", "exp_chaishots")]
+    job_ids = {p["id"] for p in points_for_item(payload, "experience", "exp_chaishots")}
+
+    payload = set_item_points(
+        payload, "experience", "exp_chaishots",
+        ["Added Redis caching", "Built personalization pipeline"],
+        project_id="wp_rec",
+    )
+    project = next(
+        pr for i in payload["inventory"]["sections"]["experience"]["items"]
+        if i["id"] == "exp_chaishots" for pr in i["projects"]
+    )
+    job = next(i for i in payload["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    if project["bullets"] != ["Added Redis caching", "Built personalization pipeline"]:
+        problems.append(f"project bullets={project['bullets']}")
+    if job["bullets"] != job_points:
+        problems.append(f"job bullets changed: {job['bullets']}")
+    if {p["id"] for p in points_for_item(payload, "experience", "exp_chaishots")} != job_ids:
+        problems.append("setting project points changed the job's points")
+    if payload["inventory"]["sections"]["projects"]["items"] != load_fixture("sample_career.json")["inventory"]["sections"]["projects"]["items"]:
+        problems.append("independent Projects section changed")
+
+    # The same sentence at both levels is two different points.
+    same_job = next(p for p in points_for_item(payload, "experience", "exp_chaishots"))
+    same_project = next(
+        p for p in points_for_item(payload, "experience", "exp_chaishots", "wp_rec")
+        if p["content"] == "Built personalization pipeline"
+    )
+    if same_job["content"] == same_project["content"] and same_job["id"] == same_project["id"]:
+        problems.append("job-level and project-level point share an id")
+
+    # Labels survive changes at either level, and changes at one level never touch the other.
+    marked = next(p for p in payload["claims"] if p["id"] == same_project["id"])
+    marked.update({"status": "supported", "supportedBy": ["fact_lambda"]})
+    marked_id = marked["id"]
+    payload = set_item_points(
+        payload, "experience", "exp_chaishots",
+        ["Added Redis caching", "Built personalization pipeline", "Cut latency"],
+        project_id="wp_rec",
+    )
+    kept = next(p for p in payload["claims"] if p["id"] == marked_id)
+    if (kept["status"], kept["supportedBy"]) != ("supported", ["fact_lambda"]):
+        problems.append("project point lost its labels when another was added")
+    payload = set_item_points(payload, "experience", "exp_chaishots", ["Mentored two interns"])
+    after_job = next(
+        pr for i in payload["inventory"]["sections"]["experience"]["items"]
+        if i["id"] == "exp_chaishots" for pr in i["projects"]
+    )
+    if len(after_job["bullets"]) != 3:
+        problems.append("changing the job's points changed the project's")
+    if _copies_out_of_step(payload):
+        problems.append(f"bullets copies out of step: {_copies_out_of_step(payload)}")
+    # A reload may reorder the claims list (the upgrade writes it in item order) but must
+    # keep every claim exactly, and one more pass must change nothing.
+    reloaded = normalize_payload(json.loads(json.dumps(payload)))
+    by_id = lambda record: sorted(record["claims"], key=lambda c: c["id"])
+    if by_id(reloaded) != by_id(payload):
+        problems.append("a reload changed or lost a claim")
+    if {k: v for k, v in reloaded.items() if k != "claims"} != {
+        k: v for k, v in payload.items() if k != "claims"
+    }:
+        problems.append("a reload changed something other than the claims order")
+    if normalize_payload(json.loads(json.dumps(reloaded))) != reloaded:
+        problems.append("repeating the upgrade changed the record")
+
+    for label, call in {
+        "unknown project": lambda: set_item_points(payload, "experience", "exp_chaishots", ["x"], project_id="nope"),
+        "project on an independent project": lambda: set_item_points(payload, "projects", "proj_x", ["x"], project_id="wp_rec"),
+    }.items():
+        try:
+            call()
+            problems.append(f"{label} was accepted")
+        except KeyError:
+            pass
+
+    # Facts remember the project they belong to and are not merged across levels.
+    with_facts = add_fact(payload, "Used Redis", section="experience", item_id="exp_chaishots")
+    with_facts = add_fact(
+        with_facts, "Used Redis", section="experience", item_id="exp_chaishots", project_id="wp_rec"
+    )
+    redis = [f for f in with_facts["facts"] if f["content"] == "Used Redis"]
+    if sorted(str(f["context"].get("projectId")) for f in redis) != ["None", "wp_rec"]:
+        problems.append(f"fact contexts={[f['context'] for f in redis]}")
+
+    ok = not problems
+    print(f"project_points_stay_separate: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_projects_tolerate_bad_data() -> bool:
+    raw = _with_project(load_fixture("sample_career.json"))
+    job = next(i for i in raw["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    job["projects"] = [
+        "not an object",
+        {"id": "wp_rec", "name": "Recommendation engine"},
+        {"id": "wp_rec", "name": "Same id again"},
+        {"name": "No id", "technologies": "not a list"},
+        {"name": "No id"},
+    ]
+    orphan = new_point("experience", "exp_chaishots", "Point of a deleted project", 0, project_id="wp_gone")
+    raw["claims"].append(orphan)
+    total_before = len([c for c in raw["claims"] if c.get("itemId")])
+
+    first = normalize_payload(json.loads(json.dumps(raw)))
+    second = normalize_payload(json.loads(json.dumps(raw)))
+    problems = []
+    if first != second:
+        problems.append("the same bad record normalized differently twice")
+    if normalize_payload(json.loads(json.dumps(first))) != first:
+        problems.append("a second upgrade changed the result")
+    projects = next(
+        i for i in first["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots"
+    )["projects"]
+    ids = [pr["id"] for pr in projects]
+    if len(projects) != 4:
+        problems.append(f"expected 4 projects (the non-object dropped), got {len(projects)}")
+    if len(set(ids)) != len(ids):
+        problems.append(f"project ids not unique: {ids}")
+    if not all(isinstance(pr["technologies"], list) and pr.get("story") is not None and pr.get("writing") for pr in projects):
+        problems.append("a project is missing technologies, story or writing")
+    moved = [p for p in first["claims"] if p["content"] == "Point of a deleted project"]
+    if len(moved) != 1 or moved[0].get("projectId") is not None or moved[0]["id"] != orphan["id"]:
+        problems.append(f"orphan point not kept at job level: {moved}")
+    if len([c for c in first["claims"] if c.get("itemId")]) != total_before:
+        problems.append("a point was lost or duplicated")
+    if _copies_out_of_step(first):
+        problems.append(f"bullets copies out of step: {_copies_out_of_step(first)}")
+    ok = not problems
+    print(f"projects_tolerate_bad_data: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def _raises(call, kind) -> bool:
+    try:
+        call()
+    except kind:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def test_project_operations() -> bool:
+    import work_projects as wp
+
+    problems = []
+    base = load_fixture("sample_career.json")
+    job = ("experience", "exp_chaishots")
+
+    # Adding: name rules, technologies cleaned, first points, facts, story and writing.
+    payload, pid = wp.add_project(
+        base, *job, "  Recommendation   engine ",
+        technologies=["Redis", "redis", "", "Python"], bullets=["Added Redis caching", "  "],
+    )
+    project = wp.get_project(payload, *job, pid)
+    if project["name"] != "Recommendation engine":
+        problems.append(f"name not tidied: {project['name']!r}")
+    if project["technologies"] != ["Redis", "Python"]:
+        problems.append(f"technologies={project['technologies']}")
+    if project["bullets"] != ["Added Redis caching"] or project["status"] != "active":
+        problems.append(f"bullets/status wrong: {project}")
+    if not project["story"] or project["writing"]["status"] != "idle":
+        problems.append("new project has no story or writing marker")
+    if [c["content"] for c in points_for_item(payload, *job, pid)] != ["Added Redis caching"]:
+        problems.append("project points not created")
+    if [c["content"] for c in points_for_item(payload, *job)] != [
+        c["content"] for c in points_for_item(base, *job)
+    ]:
+        problems.append("adding a project changed the job's own points")
+
+    rejected = {
+        "empty name": lambda: wp.add_project(base, *job, "   "),
+        "name too long": lambda: wp.add_project(base, *job, "x" * 121),
+        "duplicate name, different capitals": lambda: wp.add_project(
+            payload, *job, "RECOMMENDATION ENGINE"
+        ),
+    }
+    for label, call in rejected.items():
+        if not _raises(call, ValueError):
+            problems.append(f"{label} was accepted")
+    for label, call, kind in (
+        ("unknown job", lambda: wp.add_project(base, "experience", "exp_nope", "X"), KeyError),
+        ("independent Projects section", lambda: wp.add_project(base, "projects", "p", "X"), ValueError),
+        ("education section", lambda: wp.add_project(base, "education", "e", "X"), ValueError),
+        ("unknown project", lambda: wp.rename_project(payload, *job, "wp_nope", "Y"), KeyError),
+    ):
+        if not _raises(call, kind):
+            problems.append(f"{label} was not refused")
+    unverified = json.loads(json.dumps(base))
+    unverified["intake"]["basicsVerified"] = False
+    unverified["intake"]["basicsConfirmed"] = False
+    if not _raises(lambda: wp.add_project(unverified, *job, "X"), ValueError):
+        problems.append("a project was added before details were confirmed")
+
+    # Renaming: same-name rule, but renaming to its own name is fine.
+    payload, second = wp.add_project(payload, *job, "Event pipeline")
+    if not _raises(lambda: wp.rename_project(payload, *job, second, "recommendation engine"), ValueError):
+        problems.append("renamed onto another project's name")
+    payload = wp.rename_project(payload, *job, second, "Event workflows")
+    payload = wp.rename_project(payload, *job, second, "Event workflows")
+    if wp.get_project(payload, *job, second)["name"] != "Event workflows":
+        problems.append("rename did not apply")
+
+    # Reordering: every active project exactly once.
+    for label, ids in (("missing one", [second]), ("unknown id", [second, pid, "wp_nope"]), ("empty", [])):
+        if not _raises(lambda ids=ids: wp.reorder_projects(payload, *job, ids), (ValueError, KeyError)):
+            problems.append(f"reorder with {label} was accepted")
+    payload = wp.reorder_projects(payload, *job, [second, pid, second])
+    names = [x["name"] for x in payload["inventory"]["sections"]["experience"]["items"][0]["projects"]]
+    if names != ["Event workflows", "Recommendation engine"]:
+        problems.append(f"order after reorder={names}")
+
+    # Archiving keeps the points, frees the name, and is refused twice.
+    payload = wp.archive_project(payload, *job, pid)
+    if not _raises(lambda: wp.archive_project(payload, *job, pid), ValueError):
+        problems.append("archived the same project twice")
+    if [c["content"] for c in points_for_item(payload, *job, pid)] != ["Added Redis caching"]:
+        problems.append("archiving lost the project's points")
+    payload, reused = wp.add_project(payload, *job, "Recommendation engine")
+    payload = wp.reorder_projects(payload, *job, [reused, second])
+    ordered = [
+        (x["name"], x["status"])
+        for x in payload["inventory"]["sections"]["experience"]["items"][0]["projects"]
+    ]
+    if ordered != [("Recommendation engine", "active"), ("Event workflows", "active"),
+                   ("Recommendation engine", "archived")]:
+        problems.append(f"archived project not kept after the active ones: {ordered}")
+
+    # Whatever the sequence, the record is tidy and the copies match.
+    if _copies_out_of_step(payload):
+        problems.append(f"bullets copies out of step: {_copies_out_of_step(payload)}")
+    again = normalize_payload(json.loads(json.dumps(payload)))
+    if normalize_payload(json.loads(json.dumps(again))) != again:
+        problems.append("repeating the upgrade changed the record")
+    if normalize_payload(json.loads(json.dumps(payload)))["inventory"] != payload["inventory"]:
+        problems.append("the upgrade changed the inventory the operations produced")
+
+    ok = not problems
+    print(f"project_operations: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_project_search_and_facts() -> bool:
+    import assistant_result
+    import work_projects as wp
+    from context_selector import select_resume_context
+    from facts import sync_facts_from_item
+
+    problems = []
+    base = load_fixture("sample_career.json")
+    job = ("experience", "exp_chaishots")
+    payload, pid = wp.add_project(
+        base, *job, "Quasar ledger", technologies=["Zig"], bullets=["Reconciled the quasar accounts"]
+    )
+
+    # A phrase only the project contains finds the job, and the project is listed.
+    context = select_resume_context(payload, "quasar ledger")
+    top = context["candidates"][0] if context["candidates"] else {}
+    if top.get("id") != "exp_chaishots" or [p["id"] for p in top.get("projects", [])] != [pid]:
+        problems.append(f"search did not surface the project: {top.get('id')}, {top.get('projects')}")
+    short_candidates = assistant_result.from_search(payload, context)["candidates"]
+    short = short_candidates[0] if short_candidates else {}
+    if short.get("projects") != [{"projectId": pid, "name": "Quasar ledger"}]:
+        problems.append(f"short search result projects={short.get('projects')}")
+
+    # Archived projects stop matching and stop being listed.
+    archived = wp.archive_project(payload, *job, pid)
+    after = select_resume_context(archived, "quasar ledger zig")["candidates"]
+    if any(c.get("projects") for c in after):
+        problems.append("an archived project is still listed")
+    if select_resume_context(archived, "quasar")["candidates"] and any(
+        c["id"] == "exp_chaishots" and c.get("score", 0) > 1
+        for c in select_resume_context(archived, "quasar")["candidates"]
+    ):
+        problems.append("an archived project still adds to the job's match score")
+
+    # The listing is capped however many projects there are.
+    many = payload
+    for n in range(8):
+        many, _ = wp.add_project(many, *job, f"Extra {n}")
+    capped = assistant_result.from_search(many, select_resume_context(many, "chaishots extra"))["candidates"]
+    listed = max((len(c.get("projects", [])) for c in capped), default=0)
+    if listed > assistant_result.PROJECT_CAP:
+        problems.append(f"{listed} projects listed for one match")
+
+    # Facts from a project's points carry the project; the job's facts are separate.
+    jobs = get_item_for_test(payload, *job)
+    project = wp.get_project(payload, *job, pid)
+    with_facts = sync_facts_from_item(payload, "experience", jobs, project=project)
+    mine = [f for f in with_facts["facts"] if (f["context"].get("projectId") or None) == pid]
+    if sorted(f["content"] for f in mine) != ["Reconciled the quasar accounts", "Used Zig"]:
+        problems.append(f"project facts={[f['content'] for f in mine]}")
+    if any(f["kind"] != "tool" for f in mine if f["content"] == "Used Zig"):
+        problems.append("a project technology fact is not marked as a tool")
+
+    # Typed chat and voice share the same tools.
+    import chat_tools
+    new_payload, summary = chat_tools.execute_tool(
+        base, "add_project", {"itemId": "exp_chaishots", "name": "Chat project", "bullets": ["Did a thing"]}
+    )
+    if not summary.get("projectId") or not any(
+        f["context"].get("projectId") == summary["projectId"] for f in new_payload["facts"]
+    ):
+        problems.append("add_project through typed chat did not create the project and its facts")
+    setup = {t["name"] for t in chat_tools.INTAKE_TOOL_DEFINITIONS}
+    edit = {t["name"] for t in chat_tools.TOOL_DEFINITIONS}
+    if "add_project" not in setup or {"rename_project", "archive_project", "reorder_projects"} & setup:
+        problems.append(f"setup tools wrong: {sorted(setup)}")
+    if not {"add_project", "rename_project", "archive_project", "reorder_projects"} <= edit:
+        problems.append(f"edit tools wrong: {sorted(edit)}")
+
+    ok = not problems
+    print(f"project_search_and_facts: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def get_item_for_test(payload: dict, section: str, item_id: str) -> dict:
+    return next(i for i in payload["inventory"]["sections"][section]["items"] if i["id"] == item_id)
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -1048,10 +1454,38 @@ def test_single_save_door() -> bool:
 
 def test_example_record_is_current() -> bool:
     path = ROOT / "api" / "resume-schema.example.json"
-    example = json.loads(path.read_text())
+
+    def reject_duplicate_keys(pairs):
+        keys = [key for key, _ in pairs]
+        repeated = sorted({key for key in keys if keys.count(key) > 1})
+        if repeated:
+            raise ValueError(f"duplicate keys {repeated}")
+        return dict(pairs)
+
     problems = []
+    try:
+        # A repeated key would be silently resolved to its last value by json.loads.
+        example = json.loads(path.read_text(), object_pairs_hook=reject_duplicate_keys)
+    except ValueError as err:
+        print(f"example_record_is_current: FAIL (problems=['{err}'])")
+        return False
     if example.get("schemaVersion") != 5:
         problems.append(f"schemaVersion={example.get('schemaVersion')}")
+    # The example should show a project inside a job, with a point owned by that project.
+    projects = [
+        (item["id"], project)
+        for item in example["inventory"]["sections"]["experience"]["items"]
+        for project in item.get("projects") or []
+    ]
+    if not projects:
+        problems.append("the example has no project inside a job")
+    for item_id, project in projects:
+        owned = [
+            c for c in example["claims"]
+            if c.get("itemId") == item_id and c.get("projectId") == project["id"]
+        ]
+        if not owned or [c["content"] for c in owned] != project.get("bullets"):
+            problems.append(f"project {project['id']}: its points are not recorded as its own")
     if normalize_payload(json.loads(path.read_text())) != example:
         problems.append("normalizing it changes it; regenerate the file")
     if _copies_out_of_step(example):
@@ -1094,6 +1528,11 @@ def main() -> int:
         test_v5_label_defaults,
         test_v5_labels_survive_reload,
         test_v5_rejects_unknown_labels,
+        test_projects_upgrade_changes_nothing,
+        test_project_points_stay_separate,
+        test_projects_tolerate_bad_data,
+        test_project_operations,
+        test_project_search_and_facts,
         test_save_door,
         test_voice_add_entry_end_to_end,
         test_assistant_result_is_small_and_constant,

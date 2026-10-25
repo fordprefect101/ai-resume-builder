@@ -37,8 +37,9 @@ Do not collect or change personal basics (name, email, phone, location, links).
 Those are already confirmed in the app. Start with skills. Adapt skills questions
 to the user's background. Then address experience, projects, education, and
 achievements. For every item, keep collecting its fields until the user confirms
-it is complete; call add_item once with all fields and confirmed blanks. If a
-whole section is skipped, confirm that explicitly. Call complete_intake only after
+it is complete; call add_item once with all fields and confirmed blanks. A distinct
+piece of work done inside a job is saved with add_project using that job's itemId.
+If a whole section is skipped, confirm that explicitly. Call complete_intake only after
 skills and all sections have been addressed. Do not invent facts.
 """
 

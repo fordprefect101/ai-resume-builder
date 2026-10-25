@@ -66,6 +66,14 @@ def _tokens(value: str) -> list[str]:
     ]
 
 
+def _active_projects(item: dict) -> list[dict]:
+    return [
+        p
+        for p in (item.get("projects") or [])
+        if isinstance(p, dict) and p.get("id") and p.get("status") != "archived"
+    ]
+
+
 def _search_text(item: dict) -> str:
     parts: list[str] = []
     for key, value in item.items():
@@ -75,6 +83,11 @@ def _search_text(item: dict) -> str:
             parts.append(value)
         elif isinstance(value, list):
             parts.extend(str(entry) for entry in value if isinstance(entry, str))
+    # A job is also matched by what its active projects are called and contain.
+    for project in _active_projects(item):
+        parts.append(str(project.get("name") or ""))
+        for key in ("technologies", "bullets"):
+            parts.extend(str(e) for e in project.get(key) or [] if isinstance(e, str))
     return " ".join(parts).lower()
 
 
@@ -104,6 +117,12 @@ def _compact_item(item: dict, on_resume: bool) -> dict:
         compact_value = _compact_value(value)
         if compact_value not in (None, "", []):
             compact[key] = compact_value
+    projects = _active_projects(item)
+    if projects:
+        compact["projects"] = [
+            {"id": p["id"], "name": str(p.get("name") or "")[:MAX_STRING_CHARS]}
+            for p in projects[:MAX_LIST_ITEMS]
+        ]
     return compact
 
 
