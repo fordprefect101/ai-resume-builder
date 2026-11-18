@@ -1,0 +1,22 @@
+{
+  "id": "led_legitimately",
+  "profession": "tech",
+  "hardCase": "really did lead",
+  "entry": { "section": "experience", "title": "Tech Lead", "company": "Orchard Support" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "typed",
+      "text": "I led a team of four engineers building the internal admin tool. I chose React and FastAPI, ran the weekly planning, and did the code reviews. We launched to the support team in October and I trained about thirty of them."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "I led a team of four engineers building the internal admin tool", "kind": "action", "owner": "me" },
+    { "id": "k2", "phrase": "I chose React and FastAPI", "kind": "tool", "owner": "me" },
+    { "id": "k3", "phrase": "ran the weekly planning", "kind": "action", "owner": "me" },
+    { "id": "k4", "phrase": "did the code reviews", "kind": "action", "owner": "me" },
+    { "id": "k5", "phrase": "I trained about thirty of them", "kind": "action", "owner": "me" }
+  ],
+  "mustNotClaim": ["%", "Kubernetes", "Postgres", "million", "global"],
+  "missing": ["what the tool changed for the support team"]
+}

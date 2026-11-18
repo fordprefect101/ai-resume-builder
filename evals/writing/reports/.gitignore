@@ -1,0 +1,3 @@
+# Every run saves a dated report here. Only the baseline (the bar later runs are
+# compared to) is kept in git, and only when you choose to with --save-baseline.
+report-*.json

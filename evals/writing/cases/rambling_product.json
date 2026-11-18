@@ -1,0 +1,26 @@
+{
+  "id": "rambling_product",
+  "profession": "tech",
+  "hardCase": "rambling product description",
+  "entry": { "section": "experience", "title": "Full-stack Developer", "company": "BookNook" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "voice",
+      "text": "So at the startup I was basically the person who ended up owning the, um, the scheduling thing. It's like, customers are salons, right, and they have these chairs and stylists and everybody wants to book online, so I built the booking page in React and the backend was Node with Postgres, and there was this whole thing about double bookings which was a nightmare because two people could hit the same slot."
+    },
+    {
+      "id": "c2",
+      "source": "voice",
+      "text": "So I fixed it by locking the slot while somebody is checking out, and after that we basically stopped getting the angry emails about double bookings."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "I built the booking page in React", "kind": "action", "owner": "me" },
+    { "id": "k2", "phrase": "the backend was Node with Postgres", "kind": "tool", "owner": "unclear" },
+    { "id": "k3", "phrase": "I fixed it by locking the slot while somebody is checking out", "kind": "action", "owner": "me" },
+    { "id": "k4", "phrase": "we basically stopped getting the angry emails about double bookings", "kind": "result", "owner": "team" }
+  ],
+  "mustNotClaim": ["Redis", "Kubernetes", "%", "led", "thousand", "million"],
+  "missing": ["how many salons or bookings", "how the locking was built"]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "we_versus_i_team",
+  "profession": "tech",
+  "hardCase": "we versus I",
+  "entry": { "section": "experience", "title": "Mobile Developer", "company": "Tanager Health" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "typed",
+      "text": "We rebuilt the whole mobile app in Flutter last year. It was a team of six. I mostly worked on the login and onboarding screens and I wrote the tests for them. We shipped in March."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "We rebuilt the whole mobile app in Flutter", "kind": "action", "owner": "team" },
+    { "id": "k2", "phrase": "It was a team of six", "kind": "scale", "owner": "team" },
+    { "id": "k3", "phrase": "I mostly worked on the login and onboarding screens", "kind": "action", "owner": "me" },
+    { "id": "k4", "phrase": "I wrote the tests for them", "kind": "action", "owner": "me" }
+  ],
+  "mustNotClaim": ["led", "owned", "architected", "Dart", "iOS", "Android", "%"],
+  "missing": ["which testing tools", "the outcome of the launch"]
+}

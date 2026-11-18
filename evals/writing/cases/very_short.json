@@ -1,0 +1,14 @@
+{
+  "id": "very_short",
+  "profession": "tech",
+  "hardCase": "very short answer",
+  "entry": { "section": "projects", "title": "API project" },
+  "story": [
+    { "id": "c1", "source": "typed", "text": "Built a REST API in Django." }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "Built a REST API in Django", "kind": "action", "owner": "me" }
+  ],
+  "mustNotClaim": ["%", "users", "PostgreSQL", "Docker", "led", "million", "scalable"],
+  "missing": ["what the API did", "who used it", "any result"]
+}

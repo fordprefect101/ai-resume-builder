@@ -1,0 +1,22 @@
+{
+  "id": "spoken_numbers",
+  "profession": "tech",
+  "hardCase": "numbers said in words",
+  "entry": { "section": "experience", "title": "Backend Developer", "company": "Quill Market" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "voice",
+      "text": "We had this search page that was really slow, like eight seconds sometimes. I added an index in the database and a cache in front of it and it went down to under half a second. That was for a catalogue of about two hundred thousand products. I think we got maybe fifteen percent more people clicking through after that."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "like eight seconds sometimes", "kind": "context", "owner": "unclear" },
+    { "id": "k2", "phrase": "I added an index in the database and a cache in front of it", "kind": "action", "owner": "me" },
+    { "id": "k3", "phrase": "under half a second", "kind": "result", "owner": "unclear" },
+    { "id": "k4", "phrase": "about two hundred thousand products", "kind": "scale", "owner": "unclear" },
+    { "id": "k5", "phrase": "maybe fifteen percent more people clicking through", "kind": "result", "owner": "unclear" }
+  ],
+  "mustNotClaim": ["Elasticsearch", "Redis", "Postgres", "led", "million", "50%"],
+  "missing": ["which database and cache"]
+}

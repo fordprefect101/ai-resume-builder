@@ -96,6 +96,53 @@ def add_fact(
     return {**payload, "facts": facts}
 
 
+def replace_ai_facts(
+    payload: dict,
+    section: str,
+    item_id: str,
+    facts: list[dict],
+    *,
+    project_id: str | None = None,
+) -> dict:
+    """
+    Swap the writing team's facts for one entry (or one project) for a fresh set.
+    Facts the person or an import added are kept. Running it twice with the same
+    facts gives the same record.
+    """
+    payload = ensure_facts(payload)
+
+    def mine(f: dict) -> bool:
+        return (
+            f.get("source") == "ai"
+            and (f.get("context") or {}).get("section") == section
+            and (f.get("context") or {}).get("itemId") == item_id
+            and ((f.get("context") or {}).get("projectId") or None) == (project_id or None)
+        )
+
+    created = {f["id"]: f.get("createdAt") for f in payload["facts"] if mine(f)}
+    kept = [f for f in payload["facts"] if not mine(f)]
+    for fact in facts:
+        if fact.get("kind") not in FACT_KINDS or fact.get("owner") not in FACT_OWNERS:
+            raise ValueError("fact has an unknown kind or owner")
+        kept.append({
+            "id": fact["id"],
+            "content": fact["content"],
+            "context": {
+                "section": section,
+                "itemId": item_id,
+                "field": None,
+                "projectId": project_id or None,
+            },
+            "source": "ai",
+            "createdAt": created.get(fact["id"]) or _now(),
+            "kind": fact["kind"],
+            "owner": fact["owner"],
+            "quote": fact.get("quote"),
+            "storyId": fact.get("storyId"),
+        })
+    return {**payload, "facts": kept}
+
+
 def facts_for_item(payload: dict, section: str, item_id: str) -> list[dict]:
     return [
         f

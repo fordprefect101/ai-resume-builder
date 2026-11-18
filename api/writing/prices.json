@@ -1,0 +1,10 @@
+{
+  "_note": "Hand-kept. Dollars per 1,000,000 tokens, standard (non-batch) text tier, copied from the provider's own price page. A model missing from here (or set to null) is reported as unpriced, never guessed. Prices change: re-copy them before trusting a cost figure.",
+  "_source": "https://developers.openai.com/api/docs/pricing",
+  "_copiedOn": "2026-10-25",
+  "openai": {
+    "gpt-4.1-mini": { "input": 0.40, "output": 1.60 },
+    "gpt-4.1": { "input": 2.00, "output": 8.00 },
+    "gpt-4.1-nano": { "input": 0.10, "output": 0.40 }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "lots_of_numbers",
+  "profession": "tech",
+  "hardCase": "lots of numbers",
+  "entry": { "section": "experience", "title": "Backend Engineer", "company": "Kestrel Retail" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "typed",
+      "text": "Led the checkout rewrite at a retail startup. Cut p95 latency from 1.8 s to 420 ms, 99.95% uptime over 12 months, 3 engineers, 40k orders a day at peak, moved 14 services from EC2 to ECS."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "Led the checkout rewrite", "kind": "action", "owner": "me" },
+    { "id": "k2", "phrase": "Cut p95 latency from 1.8 s to 420 ms", "kind": "result", "owner": "me" },
+    { "id": "k3", "phrase": "99.95% uptime over 12 months", "kind": "result", "owner": "unclear" },
+    { "id": "k4", "phrase": "40k orders a day at peak", "kind": "scale", "owner": "unclear" },
+    { "id": "k5", "phrase": "moved 14 services from EC2 to ECS", "kind": "action", "owner": "me" }
+  ],
+  "mustNotClaim": ["Kubernetes", "Terraform", "60%", "million", "global"],
+  "missing": ["what the 3 engineers did", "why the rewrite was needed"]
+}

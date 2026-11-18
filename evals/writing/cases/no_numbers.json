@@ -1,0 +1,22 @@
+{
+  "id": "no_numbers",
+  "profession": "tech",
+  "hardCase": "no numbers",
+  "entry": { "section": "experience", "title": "Data Engineer", "company": "Ferrous Works" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "voice",
+      "text": "I worked on the data pipeline that takes the sensor readings from the machines and cleans them up before they go into the warehouse. It was in Python, and we used Airflow to schedule it. The old one broke all the time, so I rewrote the parsing part and it got way more reliable. The analysts stopped pinging us every morning."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "I worked on the data pipeline that takes the sensor readings", "kind": "context", "owner": "me" },
+    { "id": "k2", "phrase": "It was in Python, and we used Airflow to schedule it", "kind": "tool", "owner": "team" },
+    { "id": "k3", "phrase": "I rewrote the parsing part", "kind": "action", "owner": "me" },
+    { "id": "k4", "phrase": "it got way more reliable", "kind": "result", "owner": "unclear" },
+    { "id": "k5", "phrase": "The analysts stopped pinging us every morning", "kind": "result", "owner": "team" }
+  ],
+  "mustNotClaim": ["%", "percent", "hours", "Kafka", "Spark", "led", "million"],
+  "missing": ["how much data or how many machines", "how reliability was measured"]
+}

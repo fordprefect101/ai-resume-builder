@@ -1,0 +1,121 @@
+{
+  "_note": "Each fact set has an honest point and an exaggerated one. 'codeShouldCatch' says whether api/writing/rules.py is expected to flag it; false marks a known gap that only an AI checker can close. expectedCodes lists the rule codes that must appear.",
+  "traps": [
+    {
+      "id": "t1_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "Rewrote the report generator in Python", "quote": "I rewrote the report generator in Python", "kind": "action", "owner": "me" },
+        { "id": "f2", "content": "Reports ran noticeably faster", "quote": "reports ran way faster after that", "kind": "result", "owner": "me" }
+      ],
+      "point": "Rewrote the report generator in Python, making reports run noticeably faster",
+      "supportedBy": ["f1", "f2"]
+    },
+    {
+      "id": "t1_invented_number",
+      "label": "exaggerated",
+      "flaw": "invented number",
+      "factsFrom": "t1_honest",
+      "point": "Rewrote the report generator in Python, cutting report time by 70%",
+      "supportedBy": ["f1", "f2"],
+      "codeShouldCatch": true,
+      "expectedCodes": ["number_not_in_facts"]
+    },
+    {
+      "id": "t2_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "Built a notification service in Node", "quote": "I built a notification service in Node", "kind": "action", "owner": "me" }
+      ],
+      "point": "Built a notification service in Node",
+      "supportedBy": ["f1"]
+    },
+    {
+      "id": "t2_invented_tool",
+      "label": "exaggerated",
+      "flaw": "invented tool",
+      "factsFrom": "t2_honest",
+      "point": "Built a notification service in Node with Kafka queues",
+      "supportedBy": ["f1"],
+      "codeShouldCatch": true,
+      "expectedCodes": ["tool_not_in_facts"]
+    },
+    {
+      "id": "t3_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "The team migrated the database to Postgres", "quote": "we migrated the database to Postgres", "kind": "action", "owner": "team" }
+      ],
+      "point": "Contributed to the database migration to Postgres",
+      "supportedBy": ["f1"]
+    },
+    {
+      "id": "t3_claims_leadership",
+      "label": "exaggerated",
+      "flaw": "we became I led",
+      "factsFrom": "t3_honest",
+      "point": "Led the database migration to Postgres",
+      "supportedBy": ["f1"],
+      "codeShouldCatch": true,
+      "expectedCodes": ["ownership_not_in_facts"]
+    },
+    {
+      "id": "t4_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "Built an internal tool for the support team in Django", "quote": "I built an internal tool for the support team in Django", "kind": "action", "owner": "me" }
+      ],
+      "point": "Built an internal tool for the support team in Django",
+      "supportedBy": ["f1"]
+    },
+    {
+      "id": "t4_boast",
+      "label": "exaggerated",
+      "flaw": "inflated scale words",
+      "factsFrom": "t4_honest",
+      "point": "Built an enterprise tool for the global support team in Django",
+      "supportedBy": ["f1"],
+      "codeShouldCatch": true,
+      "expectedCodes": ["boastful_term"]
+    },
+    {
+      "id": "t5_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "Implemented the payment retry logic", "quote": "I make the payment retry logic", "kind": "action", "owner": "me" },
+        { "id": "f2", "content": "Used Java and Spring", "quote": "I make this with Java and Spring", "kind": "tool", "owner": "me" }
+      ],
+      "point": "Implemented payment retry logic in Java and Spring",
+      "supportedBy": ["f1", "f2"]
+    },
+    {
+      "id": "t5_overstated_scope",
+      "label": "exaggerated",
+      "flaw": "one feature became a whole platform",
+      "factsFrom": "t5_honest",
+      "point": "Redesigned the company's entire payments platform in Java and Spring",
+      "supportedBy": ["f1", "f2"],
+      "codeShouldCatch": false,
+      "expectedCodes": []
+    },
+    {
+      "id": "t6_honest",
+      "label": "honest",
+      "facts": [
+        { "id": "f1", "content": "Added a cache in front of the search endpoint", "quote": "I added a cache in front of the search endpoint", "kind": "action", "owner": "me" }
+      ],
+      "point": "Added a cache in front of the search endpoint",
+      "supportedBy": ["f1"]
+    },
+    {
+      "id": "t6_unstated_result",
+      "label": "exaggerated",
+      "flaw": "a result nobody said",
+      "factsFrom": "t6_honest",
+      "point": "Added a cache in front of the search endpoint, improving search performance for all users",
+      "supportedBy": ["f1"],
+      "codeShouldCatch": false,
+      "expectedCodes": []
+    }
+  ]
+}

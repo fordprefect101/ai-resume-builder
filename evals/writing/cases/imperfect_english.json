@@ -1,0 +1,22 @@
+{
+  "id": "imperfect_english",
+  "profession": "tech",
+  "hardCase": "imperfect English",
+  "entry": { "section": "experience", "title": "Backend Developer", "company": "Meridian Pay" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "voice",
+      "text": "In my last company I am working on the backend for the payment, how you say, the payment retry. When card is fail, the system try again after some time. I make this with Java and Spring and I add the table in MySQL for to save the attempts. Before, customer need to pay again by hand."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "the payment retry", "kind": "context", "owner": "me" },
+    { "id": "k2", "phrase": "When card is fail, the system try again after some time", "kind": "action", "owner": "unclear" },
+    { "id": "k3", "phrase": "I make this with Java and Spring", "kind": "tool", "owner": "me" },
+    { "id": "k4", "phrase": "I add the table in MySQL for to save the attempts", "kind": "action", "owner": "me" },
+    { "id": "k5", "phrase": "Before, customer need to pay again by hand", "kind": "context", "owner": "unclear" }
+  ],
+  "mustNotClaim": ["%", "Kafka", "led", "Redis", "million", "team"],
+  "missing": ["how many payments or customers", "the result of the retry"]
+}

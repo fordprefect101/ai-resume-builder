@@ -202,10 +202,15 @@ def set_item_points(
     *,
     origin: str = "legacy",
     project_id: str | None = None,
+    details: list[dict] | None = None,
 ) -> dict:
     """
     The one way to change points: the job's own (project_id empty) or one project's.
     Also refreshes the bullets copies of that item.
+
+    `details`, when given, has one dict per text, in order, with any of supportedBy,
+    status and issues. They replace those labels on the point (the writing team's
+    checked results), whether the point is new or kept from before.
     """
     if not section_has_points(section):
         raise ValueError(f"section does not carry points: {section}")
@@ -241,6 +246,16 @@ def set_item_points(
     points = reconcile_points(
         mine, section, item_id, texts, origin=origin, project_id=project_id
     )
+    if details is not None:
+        if len(details) != len(points):
+            raise ValueError("details must have one entry per point text")
+        labelled = []
+        for point, extra in zip(points, details):
+            labels = {k: v for k, v in extra.items() if k in ("supportedBy", "status", "issues")}
+            if labels.get("status", point["status"]) not in POINT_STATUSES:
+                raise ValueError(f"unknown point status: {labels['status']}")
+            labelled.append({**point, **labels, "origin": origin})
+        points = labelled
     return rebuild_bullets(
         {**payload, "claims": others + points}, only=(section, item_id)
     )

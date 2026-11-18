@@ -1,0 +1,23 @@
+{
+  "id": "two_projects_mixed",
+  "profession": "tech",
+  "hardCase": "two projects mixed",
+  "entry": { "section": "experience", "title": "Software Engineer", "company": "Larkspur Commerce" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "voice",
+      "text": "I did two main things there. One was the recommendation widget, that was in Python with scikit-learn, it suggests products on the product page. And the other, totally separate, was the invoice exporter, which is a script that generates PDFs for finance every month, I did that one with Go. The widget I did with another dev, but the exporter was just me."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "the recommendation widget, that was in Python with scikit-learn", "kind": "tool", "owner": "unclear", "project": "widget" },
+    { "id": "k2", "phrase": "it suggests products on the product page", "kind": "context", "owner": "unclear", "project": "widget" },
+    { "id": "k3", "phrase": "The widget I did with another dev", "kind": "action", "owner": "team", "project": "widget" },
+    { "id": "k4", "phrase": "the invoice exporter, which is a script that generates PDFs for finance every month", "kind": "context", "owner": "unclear", "project": "exporter" },
+    { "id": "k5", "phrase": "I did that one with Go", "kind": "tool", "owner": "me", "project": "exporter" },
+    { "id": "k6", "phrase": "the exporter was just me", "kind": "action", "owner": "me", "project": "exporter" }
+  ],
+  "mustNotClaim": ["TensorFlow", "Java", "%", "led", "million"],
+  "missing": ["any result for either project"]
+}

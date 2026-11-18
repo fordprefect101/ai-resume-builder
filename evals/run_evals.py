@@ -2366,6 +2366,1494 @@ def test_project_link_checks() -> bool:
     return ok
 
 
+def test_model_switchboard() -> bool:
+    from pydantic import BaseModel
+
+    from writing import models
+
+    class Facts(BaseModel):
+        facts: list[str]
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    saved_env = {k: os.environ.get(k) for k in (*models.JOB_SETTINGS.values(), "OPENAI_CHAT_MODEL")}
+
+    def configure(**values):
+        for key in saved_env:
+            os.environ.pop(key, None)
+        os.environ.update(values)
+
+    class Script:
+        """Stands in for OpenAI: replays scripted replies and records each request."""
+
+        replies: list = []
+        seen: list = []
+
+        def complete(self, model, messages, temperature):
+            Script.seen.append((model, messages, temperature))
+            reply = Script.replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply, 10, 5
+
+    def script(*replies):
+        Script.replies, Script.seen = list(replies), []
+
+    real_adapter = models.ADAPTERS["openai"]
+    models.ADAPTERS["openai"] = Script
+    try:
+        # --- which model does which job ---
+        configure()
+        expect("nothing set", models.resolve("writer"), ("openai", "gpt-4.1-mini"))
+        configure(OPENAI_CHAT_MODEL="gpt-x")
+        expect("falls back to the chat model", models.resolve("checker"), ("openai", "gpt-x"))
+        configure(WRITER_MODEL="openai:big-model", OPENAI_CHAT_MODEL="gpt-x")
+        expect("job setting wins", models.resolve("writer"), ("openai", "big-model"))
+        expect("other jobs unaffected", models.resolve("analyst"), ("openai", "gpt-x"))
+        configure(WRITER_MODEL="  OpenAI : spaced-model ")
+        expect("tidy parsing", models.resolve("writer"), ("openai", "spaced-model"))
+        configure(WRITER_MODEL="bare-model")
+        expect("bare name means openai", models.resolve("writer"), ("openai", "bare-model"))
+        for bad in ("martian:model", "openai:"):
+            configure(WRITER_MODEL=bad)
+            try:
+                models.resolve("writer")
+                problems.append(f"{bad!r} accepted")
+            except models.ConfigError:
+                pass
+        configure()
+        try:
+            models.resolve("barista")
+            problems.append("unknown job accepted")
+        except models.ConfigError:
+            pass
+
+        # --- a good reply ---
+        configure()
+        script('{"facts": ["built a thing"]}')
+        good = models.complete_json("writer", [{"role": "user", "content": "go"}], Facts)
+        expect("good reply", (good.ok, good.data.facts if good.data else None, good.attempts),
+               (True, ["built a thing"], 1))
+        expect("tokens counted", (good.input_tokens, good.output_tokens), (10, 5))
+        expect("model recorded", (good.provider, good.model, good.job), ("openai", "gpt-4.1-mini", "writer"))
+        expect("temperature omitted by default", Script.seen[0][2], None)
+
+        script('```json\n{"facts": []}\n```')
+        expect("fenced reply accepted", models.complete_json("writer", [], Facts).ok, True)
+
+        # --- a reply that does not fit is retried once, with the complaint ---
+        script("not json at all", '{"facts": ["ok"]}')
+        retried = models.complete_json("writer", [{"role": "user", "content": "go"}], Facts)
+        expect("retry fixes it", (retried.ok, retried.attempts), (True, 2))
+        expect("tokens add up over both tries", retried.input_tokens, 20)
+        second_request = Script.seen[1][1]
+        expect("complaint sent back", "did not match the required JSON shape" in second_request[-1]["content"], True)
+        expect("bad reply shown to the model", second_request[-2], {"role": "assistant", "content": "not json at all"})
+
+        script('{"wrong": 1}', '{"facts": "not a list"}')
+        failed = models.complete_json("writer", [], Facts)
+        expect("two bad replies fail the step", (failed.ok, failed.attempts, failed.data), (False, 2, None))
+        expect("failure explained", "required shape" in failed.error, True)
+
+        # --- outside trouble is a failed step, never a crash or a retry ---
+        script(RuntimeError("service down"))
+        down = models.complete_json("writer", [], Facts)
+        expect("outage is a failed step", (down.ok, down.attempts), (False, 1))
+        expect("outage explained", "service down" in down.error, True)
+
+        # --- the real adapter without a key fails the step cleanly (no network) ---
+        models.ADAPTERS["openai"] = real_adapter
+        saved_key = os.environ.pop("OPENAI_API_KEY", None)
+        try:
+            nokey = models.complete_json("writer", [], Facts)
+            expect("no key", (nokey.ok, "OPENAI_API_KEY" in nokey.error), (False, True))
+        finally:
+            if saved_key is not None:
+                os.environ["OPENAI_API_KEY"] = saved_key
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+        for key, value in saved_env.items():
+            os.environ.pop(key, None)
+            if value is not None:
+                os.environ[key] = value
+
+    # --- every job setting is listed in the example settings file ---
+    example = (ROOT / "api" / ".env.example").read_text()
+    for setting in models.JOB_SETTINGS.values():
+        if f"{setting}=" not in example:
+            problems.append(f"{setting} missing from .env.example")
+
+    ok = not problems
+    print(
+        f"model_switchboard: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_cost_and_run_records() -> bool:
+    from pydantic import BaseModel
+
+    from writing import models, records
+
+    class Facts(BaseModel):
+        facts: list[str]
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    # --- the hand-kept price list is well formed ---
+    listed = records.load_prices()
+    for provider, table in listed.items():
+        for model, price in table.items():
+            if not (isinstance(price, dict) and all(
+                isinstance(price.get(k), (int, float)) and price[k] >= 0 for k in ("input", "output")
+            )):
+                problems.append(f"bad price entry {provider}:{model}")
+    raw = json.loads(records.PRICES_FILE.read_text())
+    if not (raw.get("_source", "").startswith("https://") and raw.get("_copiedOn")):
+        problems.append("prices.json does not say where and when the prices were copied")
+
+    # --- cost arithmetic ---
+    real_prices = records.PRICES
+    records.PRICES = {"openai": {"cheap": {"input": 0.5, "output": 2.0}, "broken": None}}
+    try:
+        expect("cost", records.cost_usd("openai", "cheap", 1_000_000, 500_000), 1.5)
+        expect("small cost", records.cost_usd("openai", "cheap", 1000, 200), 0.0009)
+        expect("zero tokens", records.cost_usd("openai", "cheap", 0, 0), 0.0)
+        expect("unlisted model is unpriced", records.cost_usd("openai", "mystery", 10, 10), None)
+        expect("null price is unpriced", records.cost_usd("openai", "broken", 10, 10), None)
+        expect("unknown provider is unpriced", records.cost_usd("other", "cheap", 10, 10), None)
+
+        # --- the switchboard fills cost in; a Run totals steps and admits unpriced ones ---
+        class Script:
+            def complete(self, model, messages, temperature):
+                return '{"facts": ["a"]}', 2000, 400
+
+        real_adapter = models.ADAPTERS["openai"]
+        models.ADAPTERS["openai"] = Script
+        saved_env = os.environ.get("WRITER_MODEL"), os.environ.get("CHECKER_MODEL")
+        os.environ["WRITER_MODEL"] = "openai:cheap"
+        os.environ["CHECKER_MODEL"] = "openai:mystery"
+        try:
+            asked = [{"role": "user", "content": "Reach me at sam@example.com or +44 20 7946 0958"}]
+            priced = models.complete_json("writer", asked, Facts)
+            unpriced = models.complete_json("checker", asked, Facts)
+        finally:
+            models.ADAPTERS["openai"] = real_adapter
+            for name, value in zip(("WRITER_MODEL", "CHECKER_MODEL"), saved_env):
+                os.environ.pop(name, None)
+                if value is not None:
+                    os.environ[name] = value
+        expect("switchboard prices a call", priced.cost_usd, 0.0018)
+        expect("switchboard leaves unpriced as None", unpriced.cost_usd, None)
+
+        run = records.Run("entry exp_1")
+        run.add(priced, asked, name="writer")
+        run.add(unpriced, asked, name="checker")
+        totals = run.totals()
+        expect("totals", (totals["steps"], totals["inputTokens"], totals["outputTokens"]), (2, 4000, 800))
+        expect("total cost counts only priced steps", totals["costUsd"], 0.0018)
+        expect("unpriced steps are admitted", totals["unpricedSteps"], 1)
+
+        # --- the stored trace is json-safe and holds no contact details ---
+        trace = run.as_trace()
+        text = json.dumps(trace)
+        for secret in ("sam@example.com", "7946 0958"):
+            if secret in text:
+                problems.append(f"{secret!r} reached the run record")
+        expect("redaction marks left", "[email]" in text and "[phone]" in text, True)
+        expect("record has the step name and model", (trace["steps"][0]["step"], trace["steps"][0]["model"]), ("writer", "cheap"))
+        failure = models.Result(ok=False, job="writer", error="x" * 1000)
+        expect("long errors are clipped", len(records.step_record(failure)["error"]) <= 300, True)
+    finally:
+        records.PRICES = real_prices
+
+    # --- redaction keeps ordinary resume text ---
+    for kept in ("Cut load time by 40% in 2019-2023", "Served 10,000 users and 1.2M requests",
+                 "Led a team of 5 from 2021 to 2024", "Used Python 3.12 and Node.js"):
+        expect(f"kept {kept!r}", records.redact(kept), kept)
+    expect("link redacted", records.redact("see https://github.com/sam/x and www.sam.dev"), "see [link] and [link]")
+    expect("country number redacted", records.redact("call +1 415 555 0100 now"), "call [phone] now")
+    expect("long number redacted", records.redact("tel 020 7946 0958"), "tel [phone]")
+    clipped = records.step_record(
+        models.Result(ok=True, job="writer"), [{"role": "user", "content": "y" * 9000}]
+    )["input"][0]["content"]
+    expect("long text is clipped", len(clipped) <= records.MAX_TEXT + 1, True)
+
+    ok = not problems
+    print(
+        f"cost_and_run_records: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_writing_rules() -> bool:
+    import claim_verify
+    from writing import rules
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    # --- reading numbers the way a person writes them ---
+    for text, want in (
+        ("cut load time by 40%", {40.0}),
+        ("about forty percent faster", {40.0}),
+        ("twenty five engineers", {25.0}),
+        ("two hundred users", {200.0}),
+        ("three thousand requests", {3000.0}),
+        ("10,000 users", {10000.0}),
+        ("handled 10k requests", {10000.0}),
+        ("1.2M rows", {1_200_000.0}),
+        ("3 million rows", {3_000_000.0}),
+        ("1.5 thousand users", {1500.0}),
+        ("12 months and 5 bugs", {12.0, 5.0}),
+        ("420 ms and 1.8 s", {420.0, 1.8}),
+        ("Python 3.12", {3.12}),
+        ("from 2019-2023", {2019.0, 2023.0}),
+        ("no numbers here", set()),
+        ("one of the team", {1.0}),
+    ):
+        expect(f"numbers in {text!r}", rules.numbers_in(text), want)
+
+    # --- step 3: facts must be quoted from the story ---
+    story = [
+        {"id": "s1", "text": "So we built the dashboard with React and Redis. It cut the load time by like forty percent!"},
+        {"id": "s2", "text": "I led\n the migration   to Postgres, “the hard part”, for our team of five."},
+    ]
+
+    def fact(content, quote, **extra):
+        return {"content": content, "quote": quote, **extra}
+
+    facts = [
+        fact("Built a dashboard with React and Redis", "built the dashboard with React and Redis", kind="tool", owner="team"),
+        fact("Cut load time by 40%", "cut the load time by like forty percent", kind="result", owner="me"),
+        fact("Led the Postgres migration", "I led the migration to Postgres", kind="action", owner="me"),
+        fact("Said a thing", "we shipped to a million users"),
+        fact("Cut costs by 60%", "cut the load time by like forty percent"),
+        fact("No quote at all", ""),
+        fact("Skips words", "built the dashboard ... cut the load time", kind="made-up-kind", owner="boss"),
+        fact("Wrong order", "cut the load time ... built the dashboard"),
+        fact("Spans two chunks", "forty percent! I led"),
+        fact("Curly quotes", "\"the hard part\""),
+        fact("", "built the dashboard"),
+    ]
+    kept, dropped = rules.check_facts(facts, story)
+    kept_names = [f["content"] for f in kept]
+    expect("kept facts", kept_names, [
+        "Built a dashboard with React and Redis", "Cut load time by 40%",
+        "Led the Postgres migration", "Skips words", "Curly quotes"])
+    reasons = {d["fact"].get("content"): d["reason"] for d in dropped}
+    expect("invented quote dropped", reasons.get("Said a thing"), "quote is not in the story")
+    expect("invented number dropped", reasons.get("Cut costs by 60%", "")[:23], "number not in its quote")
+    expect("missing quote dropped", reasons.get("No quote at all"), "no usable quote")
+    expect("out-of-order pieces dropped", reasons.get("Wrong order"), "quote is not in the story")
+    expect("quote spanning chunks dropped", reasons.get("Spans two chunks"), "quote is not in the story")
+    expect("empty fact dropped", reasons.get(""), "empty fact")
+    by_content = {f["content"]: f for f in kept}
+    expect("source chunk recorded", by_content["Led the Postgres migration"]["storyId"], "s2")
+    expect("unknown labels become safe defaults",
+           (by_content["Skips words"]["kind"], by_content["Skips words"]["owner"]), ("unsorted", "unclear"))
+    expect("known labels kept", by_content["Cut load time by 40%"]["owner"], "me")
+
+    # --- step 5: points against their facts ---
+    f_build = {"id": "f1", "content": "Built a dashboard with React and Redis", "quote": "built the dashboard with React and Redis", "kind": "tool", "owner": "team"}
+    f_speed = {"id": "f2", "content": "Cut load time by 40%", "quote": "cut the load time by like forty percent", "kind": "result", "owner": "me"}
+    f_lead = {"id": "f3", "content": "Led the Postgres migration", "quote": "I led the migration to Postgres", "kind": "action", "owner": "me"}
+    facts5 = [f_build, f_speed, f_lead]
+
+    def codes(content, cites, terms=()):
+        return sorted(i["code"] for i in rules.check_point({"content": content, "supportedBy": cites}, facts5, terms))
+
+    expect("clean point", codes("Cut dashboard load time by 40% with React and Redis", ["f1", "f2"]), [])
+    expect("number words match digits", codes("Reduced load time by forty percent after the rebuild", ["f2"]), [])
+    expect("invented number", codes("Cut dashboard load time by 70% with React", ["f1", "f2"]), ["number_not_in_facts"])
+    expect("number from an uncited fact", codes("Cut load time by 40% using React", ["f1"]), ["number_not_in_facts"])
+    expect("invented tool", codes("Built a dashboard with React and Kafka", ["f1"]), ["tool_not_in_facts"])
+    expect("cited tool passes", codes("Built a dashboard with React and Redis", ["f1"]), [])
+    expect("company allowed without a fact", codes("Built a dashboard for ChaiShots with React", ["f1"], ["ChaiShots"]), [])
+    expect("company not allowed otherwise", codes("Built a dashboard for ChaiShots with React", ["f1"]), ["tool_not_in_facts"])
+    expect("acronym not in facts", codes("Deployed the dashboard to AWS", ["f1"]), ["tool_not_in_facts"])
+    expect("first word is not a tool", codes("Rebuilt the dashboard using React", ["f1"]), [])
+    expect("first person", "first_person" in codes("Built the dashboard that we use with React", ["f1"]), True)
+    expect("I/O alone is not first person", "first_person" in codes("Tuned I/O for the React dashboard", ["f1"]), False)
+    for opener in ("Responsible for the dashboard in React", "Worked on the React dashboard", "Building the React dashboard", "The dashboard was built in React"):
+        expect(f"weak start {opener!r}", "weak_start" in codes(opener, ["f1"]), True)
+    expect("short point", "too_short" in codes("Built it", ["f1"]), True)
+    expect("long point", "too_long" in codes(" ".join(["Built"] + ["react"] * 40), ["f1"]), True)
+    expect("no citation", "no_supporting_fact" in codes("Built a dashboard with React", []), True)
+    expect("unknown citation", "unknown_fact" in codes("Built a dashboard with React", ["nope"]), True)
+    expect("boastful word not in facts", "boastful_term" in codes("Built an enterprise dashboard with React", ["f1"]), True)
+    backed = {"id": "g", "content": "Built an enterprise dashboard with React", "quote": "enterprise dashboard", "owner": "me"}
+    backed_issues = rules.check_point(
+        {"content": "Built an enterprise dashboard with React", "supportedBy": ["g"]}, [backed]
+    )
+    expect("boastful word backed by its fact passes", [i["code"] for i in backed_issues], [])
+
+    # "we built X" must not become "led X"
+    expect("leadership claimed from a team fact", "ownership_not_in_facts" in codes("Led the dashboard build in React", ["f1"]), True)
+    expect("leadership backed by a me fact", "ownership_not_in_facts" in codes("Led the Postgres migration", ["f3"]), False)
+    expect("team work stated plainly is fine", "ownership_not_in_facts" in codes("Built a dashboard with React and Redis", ["f1"]), False)
+    expect("sole credit from a team fact", "ownership_not_in_facts" in codes("Single-handedly built the dashboard in React", ["f1"]), True)
+
+    # --- the list of points ---
+    good = [{"content": "Built a dashboard with React and Redis", "supportedBy": ["f1"]},
+            {"content": "Cut load time by 40% on the dashboard", "supportedBy": ["f2"]}]
+    expect("good list", rules.check_points(good, facts5)["listIssues"], [])
+    expect("duplicates", [i["code"] for i in rules.check_points(good + [good[0]], facts5)["listIssues"]], ["duplicate"])
+    expect("none written", [i["code"] for i in rules.check_points([], facts5)["listIssues"]], ["no_points"])
+    six = [{"content": f"Built dashboard number {n} with React", "supportedBy": ["f1"]} for n in range(6)]
+    expect("too many", "too_many_points" in [i["code"] for i in rules.check_points(six, facts5)["listIssues"]], True)
+    expect("per-point issues align", len(rules.check_points(good, facts5)["perPoint"]), 2)
+
+    # --- the shared boastful-word list, and no AI inside the rules ---
+    expect("claim_verify shares the list", claim_verify.BOASTFUL_WORDS, rules.BOASTFUL_WORDS)
+    imports = {
+        (n.module or "").split(".")[0] if isinstance(n, ast.ImportFrom) else a.name.split(".")[0]
+        for n in ast.walk(ast.parse((ROOT / "api" / "writing" / "rules.py").read_text()))
+        if isinstance(n, (ast.Import, ast.ImportFrom))
+        for a in (n.names if isinstance(n, ast.Import) else [n])
+    }
+    expect("rules.py stays code-only", imports <= {"__future__", "re"}, True)
+
+    ok = not problems
+    print(
+        f"writing_rules: {'PASS' if ok else 'FAIL'} "
+        f"({len(problems)} problems{': ' + '; '.join(problems) if problems else ''})"
+    )
+    return ok
+
+
+def test_writing_cases_valid() -> bool:
+    from writing import rules
+
+    cases_dir = ROOT / "evals" / "writing" / "cases"
+    problems: list[str] = []
+    core = {
+        "rambling product description", "we versus I", "no numbers", "lots of numbers",
+        "two projects mixed", "very short answer", "imperfect English",
+    }
+    sources = {"voice", "typed", "followup", "imported"}
+    covered: set[str] = set()
+    ids: set[str] = set()
+    phrases = 0
+
+    cases = [json.loads(p.read_text()) for p in sorted(cases_dir.glob("*.json"))]
+    if len(cases) < 10:
+        problems.append(f"only {len(cases)} stories")
+    for case in cases:
+        cid = case.get("id", "?")
+        for key in ("id", "profession", "hardCase", "entry", "story", "mustCapture", "mustNotClaim", "missing"):
+            if key not in case:
+                problems.append(f"{cid}: missing {key}")
+        if cid in ids:
+            problems.append(f"{cid}: duplicate id")
+        ids.add(cid)
+        covered.add(case.get("hardCase", ""))
+        chunks = case.get("story") or []
+        chunk_ids = [c.get("id") for c in chunks]
+        if len(set(chunk_ids)) != len(chunk_ids) or not chunks:
+            problems.append(f"{cid}: story chunk ids are not unique")
+        if any(c.get("source") not in sources for c in chunks):
+            problems.append(f"{cid}: unknown story source")
+        story_text = " ".join(rules.normalize(c.get("text")) for c in chunks)
+        captures = case.get("mustCapture") or []
+        if len({k.get("id") for k in captures}) != len(captures) or not captures:
+            problems.append(f"{cid}: mustCapture ids are not unique")
+        for k in captures:
+            phrases += 1
+            if not any(rules.normalize(k["phrase"]) in rules.normalize(c["text"]) for c in chunks):
+                problems.append(f"{cid}/{k['id']}: phrase is not in the story")
+            if k.get("kind") not in rules.FACT_KINDS or k.get("owner") not in rules.FACT_OWNERS:
+                problems.append(f"{cid}/{k['id']}: bad kind or owner")
+        for term in case.get("mustNotClaim") or []:
+            pattern = rf"(?<![a-z0-9]){re.escape(rules.normalize(term))}(?![a-z0-9])" if term[:1].isalnum() else re.escape(term)
+            if re.search(pattern, story_text):
+                problems.append(f"{cid}: story contains forbidden term {term!r}")
+        # With perfect facts built from the phrases, the rules must keep every one.
+        perfect = [{"content": k["phrase"], "quote": k["phrase"], "kind": k["kind"], "owner": k["owner"]} for k in captures]
+        kept, dropped = rules.check_facts(perfect, chunks)
+        if dropped:
+            problems.append(f"{cid}: rules dropped true facts: {[d['reason'] for d in dropped]}")
+    missing = sorted(core - covered)
+    if missing:
+        problems.append(f"hard cases not covered: {missing}")
+
+    # --- traps ---
+    traps = json.loads((ROOT / "evals" / "writing" / "traps.json").read_text())["traps"]
+    by_id = {t["id"]: t for t in traps}
+    honest = exaggerated = caught = gaps = 0
+    for trap in traps:
+        facts = trap.get("facts") or by_id.get(trap.get("factsFrom"), {}).get("facts")
+        if not facts:
+            problems.append(f"{trap['id']}: no facts")
+            continue
+        found = [i["code"] for i in rules.check_point(
+            {"content": trap["point"], "supportedBy": trap["supportedBy"]}, facts)]
+        if trap["label"] == "honest":
+            honest += 1
+            if found:
+                problems.append(f"{trap['id']}: honest point flagged {found}")
+        else:
+            exaggerated += 1
+            if trap["codeShouldCatch"]:
+                caught += 1
+                if not set(trap["expectedCodes"]) <= set(found):
+                    problems.append(f"{trap['id']}: expected {trap['expectedCodes']}, got {found}")
+            else:
+                gaps += 1  # a known gap; if the rules ever catch it, relabel it
+    if honest != exaggerated or honest < 6:
+        problems.append(f"traps: {honest} honest vs {exaggerated} exaggerated")
+
+    ok = not problems
+    print(
+        f"writing_cases_valid: {'PASS' if ok else 'FAIL'} "
+        f"(stories={len(cases)}, phrases={phrases}, trap pairs={honest}, "
+        f"rules catch {caught}, known gaps for the AI checker={gaps}, problems={problems})"
+    )
+    return ok
+
+
+def test_analyst() -> bool:
+    import writing_scoring
+    from writing import analyst, models
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    cases = {
+        p.stem: json.loads(p.read_text())
+        for p in sorted((ROOT / "evals" / "writing" / "cases").glob("*.json"))
+    }
+
+    # --- which guide, and what the model is shown ---
+    expect("engineer gets tech", analyst.pick_guide({"title": "Backend Engineer"}), "tech")
+    expect("project gets tech", analyst.pick_guide({"section": "projects", "title": "My thing"}), "tech")
+    expect("manager gets general", analyst.pick_guide({"title": "Marketing Manager"}), "general")
+    expect("nothing known gets general", analyst.pick_guide({}), "general")
+    case = cases["rambling_product"]
+    messages = analyst.build_messages(case["story"], case["entry"], "tech")
+    expect("system holds the instructions and the guide",
+           ("You are the analyst" in messages[0]["content"], "What matters in tech work" in messages[0]["content"]),
+           (True, True))
+    expect("user holds the chunks with ids", "[c1 | voice] So at the startup" in messages[1]["content"], True)
+    expect("prompt version is short and stable", (len(analyst.PROMPT_VERSION), analyst.PROMPT_VERSION), (8, analyst.PROMPT_VERSION))
+
+    class Script:
+        replies: list = []
+
+        def complete(self, model, messages, temperature):
+            reply = Script.replies.pop(0) if Script.replies else Script.fallback
+            return (json.dumps(reply) if not isinstance(reply, str) else reply), 100, 50
+
+        fallback: object = {}
+
+    def reply_for(case, picks=None, *, owner=None):
+        picks = case["mustCapture"] if picks is None else picks
+        return {"facts": [
+            {"content": k["phrase"], "kind": k["kind"], "owner": owner or k["owner"], "quote": k["phrase"]}
+            for k in picks
+        ], "missing": []}
+
+    real_adapter = models.ADAPTERS["openai"]
+    models.ADAPTERS["openai"] = Script
+    try:
+        # --- one realistic mixed reply: good, invented, mislabelled, duplicated ---
+        good = reply_for(case)
+        mixed = {
+            "facts": good["facts"] + [
+                {"content": "Served 5000 salons", "kind": "scale", "owner": "me", "quote": "we serve five thousand salons"},
+                {"content": good["facts"][0]["content"], "kind": "action", "owner": "me", "quote": good["facts"][0]["quote"]},
+                {"content": "Wrote it all", "kind": "heroics", "owner": "boss", "quote": "I fixed it by locking the slot"},
+            ],
+            "missing": ["How many salons?", "What was the result?", "A third question", "  "],
+        }
+        Script.replies = [mixed]
+        analysis = analyst.analyse(case["story"], case["entry"])
+        expect("reply accepted", analysis.ok, True)
+        expect("invented quote dropped", [d["reason"] for d in analysis.dropped if d["fact"]["content"] == "Served 5000 salons"], ["quote is not in the story"])
+        expect("duplicate dropped", "duplicate fact" in [d["reason"] for d in analysis.dropped], True)
+        expect("true facts kept", len(analysis.facts), 5)
+        wrote = next(f for f in analysis.facts if f["content"] == "Wrote it all")
+        expect("odd labels become safe defaults", (wrote["kind"], wrote["owner"]), ("unsorted", "unclear"))
+        expect("facts get ids and sources", all(f["id"].startswith("fact_") and f["storyId"] in ("c1", "c2") for f in analysis.facts), True)
+        expect("ids are unique", len({f["id"] for f in analysis.facts}), len(analysis.facts))
+        expect("source chunk found", next(f for f in analysis.facts if "locking the slot" in f["quote"] and f["content"] != "Wrote it all")["storyId"], "c2")
+        expect("questions capped and tidied", analysis.missing, ["How many salons?", "What was the result?"])
+        expect("guide and version recorded", (analysis.guide, analysis.prompt_version), ("tech", analyst.PROMPT_VERSION))
+
+        # --- an unusable reply is a failed step, not a crash ---
+        Script.replies = ["not json", "still not json"]
+        broken = analyst.analyse(case["story"], case["entry"])
+        expect("broken reply", (broken.ok, broken.facts, bool(broken.error)), (False, [], True))
+        Script.replies = [{"nothing": "useful"}, {"facts": "no"}]
+        expect("wrong shape", analyst.analyse(case["story"], case["entry"]).ok, False)
+
+        # --- the whole path on all ten stories: story -> model -> rules -> score ---
+        scores = {"perfect": [], "lazy": [], "paraphrasing": [], "claims me": []}
+        for c in cases.values():
+            Script.replies = [reply_for(c)]
+            scores["perfect"].append(writing_scoring.score_facts(c, (a := analyst.analyse(c["story"], c["entry"])).facts, a.dropped))
+            Script.replies = [reply_for(c, c["mustCapture"][:1])]
+            scores["lazy"].append(writing_scoring.score_facts(c, (a := analyst.analyse(c["story"], c["entry"])).facts, a.dropped))
+            paraphrased = reply_for(c)
+            for f in paraphrased["facts"]:
+                f["quote"] = "basically " + f["quote"] + " and so on forever"
+            Script.replies = [paraphrased]
+            scores["paraphrasing"].append(writing_scoring.score_facts(c, (a := analyst.analyse(c["story"], c["entry"])).facts, a.dropped))
+            Script.replies = [reply_for(c, owner="me")]
+            scores["claims me"].append(writing_scoring.score_facts(c, (a := analyst.analyse(c["story"], c["entry"])).facts, a.dropped))
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+
+    perfect = writing_scoring.summarize(scores["perfect"])
+    expect("perfect analyst recall", (perfect["meanRecall"], perfect["worstRecall"]), (1.0, 1.0))
+    expect("perfect analyst owners", perfect["meanOwnerRight"], 1.0)
+    expect("perfect analyst loses nothing", perfect["droppedFacts"], 0)
+    lazy = writing_scoring.summarize(scores["lazy"])
+    expect("lazy analyst scores low", lazy["meanRecall"] < 0.5 and lazy["worstRecall"] < 0.5, True)
+    expect("single-fact story cannot be lazy", scores["lazy"][[c["id"] for c in cases.values()].index("very_short")]["recall"], 1.0)
+    para = writing_scoring.summarize(scores["paraphrasing"])
+    expect("padded quotes are dropped and found out",
+           para["keptFacts"] < perfect["keptFacts"] and para["meanRecall"] < 1.0, True)
+    greedy = writing_scoring.summarize(scores["claims me"])
+    expect("turning we into me is measured", greedy["meanOwnerRight"] < 1.0, True)
+
+    # --- covers(): what counts as capturing a phrase ---
+    f = {"quote": "I built the booking page in React"}
+    expect("same words", writing_scoring.covers(f, "I built the booking page in React"), True)
+    expect("quote inside phrase", writing_scoring.covers({"quote": "booking page in React"}, "I built the booking page in React"), True)
+    expect("most words shared", writing_scoring.covers({"quote": "built booking page React"}, "I built the booking page in React"), True)
+    expect("unrelated", writing_scoring.covers({"quote": "stopped getting angry emails"}, "I built the booking page in React"), False)
+    expect("empty quote", writing_scoring.covers({"quote": ""}, "anything"), False)
+
+    ok = not problems
+    print(
+        f"analyst: {'PASS' if ok else 'FAIL'} "
+        f"(stories={len(cases)}, problems={problems})"
+    )
+    return ok
+
+
+def test_writer() -> bool:
+    import writing_scoring
+    from writing import models, writer
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    cases = {
+        p.stem: json.loads(p.read_text())
+        for p in sorted((ROOT / "evals" / "writing" / "cases").glob("*.json"))
+    }
+    booking = cases["rambling_product"]
+    team = cases["we_versus_i_team"]
+    booking_facts = writing_scoring.ground_truth_facts(booking)
+    team_facts = writing_scoring.ground_truth_facts(team)
+
+    class Script:
+        replies: list = []
+        seen: list = []
+
+        def complete(self, model, messages, temperature):
+            Script.seen.append(messages)
+            reply = Script.replies.pop(0)
+            return (json.dumps(reply) if not isinstance(reply, str) else reply), 80, 40
+
+    def point(content, *cites):
+        return {"content": content, "supportedBy": list(cites)}
+
+    real_adapter = models.ADAPTERS["openai"]
+    models.ADAPTERS["openai"] = Script
+    try:
+        # --- what the model is shown ---
+        Script.replies, Script.seen = [{"points": [point("Built the booking page in React", "gt_k1")]}], []
+        shown_facts = [{**booking_facts[0], "content": "Built the booking page in React", "quote": "WORDS ONLY IN THE QUOTE"}]
+        writer.write(shown_facts, booking["entry"])
+        user = Script.seen[0][1]["content"]
+        expect("fact id, kind, owner and content shown", "[gt_k1] (action, owner: me) Built the booking page in React" in user, True)
+        expect("quotes are not shown", "WORDS ONLY IN THE QUOTE" in user, False)
+        expect("instructions and guide shown", ("You are the writer" in Script.seen[0][0]["content"], "What matters in tech work" in Script.seen[0][0]["content"]), (True, True))
+
+        # --- a clean draft ---
+        clean = {"points": [
+            point("Built the booking page in React", "gt_k1"),
+            point("Fixed double bookings by locking the slot during checkout", "gt_k3"),
+            point("Stopped the angry emails about double bookings.", "gt_k4"),
+        ]}
+        Script.replies = [clean]
+        draft = writer.write(booking_facts, booking["entry"])
+        expect("clean draft", (draft.ok, draft.clean, len(draft.points)), (True, True, 3))
+        expect("final period tidied", draft.points[2]["content"], "Stopped the angry emails about double bookings")
+        score = writing_scoring.score_points(booking, draft.points, draft.issues["perPoint"])
+        expect("clean draft scores", (score["inventionRate"], score["stylePassRate"], score["forbidden"]), (0.0, 1.0, []))
+
+        # --- the rules flag what the writer got wrong, point by point ---
+        Script.replies = [{"points": [
+            point("Cut double bookings by 90%", "gt_k4"),
+            point("Built the booking page in React and Redis", "gt_k1"),
+            point("Responsible for the booking page", "gt_k1"),
+            point("Built the booking page in React", "gt_missing"),
+            point("Built the booking page in React", "gt_k1"),
+        ]}]
+        bad = writer.write(booking_facts, booking["entry"])
+        found = [sorted(i["code"] for i in issues) for issues in bad.issues["perPoint"]]
+        expect("invented number", "number_not_in_facts" in found[0], True)
+        expect("invented tool", "tool_not_in_facts" in found[1], True)
+        expect("weak opener", "weak_start" in found[2], True)
+        expect("unknown fact", "unknown_fact" in found[3], True)
+        expect("clean point among bad ones", found[4], [])
+        expect("duplicate flagged in the list", "duplicate" in [i["code"] for i in bad.issues["listIssues"]], True)
+        expect("not clean", bad.clean, False)
+        bad_score = writing_scoring.score_points(booking, bad.points, bad.issues["perPoint"])
+        expect("invention counted by code", (bad_score["invented"], bad_score["inventionRate"]), (3, 0.6))
+        expect("style counted separately", bad_score["stylePassRate"], 0.8)
+
+        # --- "we built it" must not become "led it" ---
+        Script.replies = [{"points": [point("Led the Flutter rebuild of the mobile app", "gt_k1")]}]
+        grabbed = writer.write(team_facts, team["entry"])
+        expect("leadership from a team fact is flagged", "ownership_not_in_facts" in [i["code"] for i in grabbed.issues["perPoint"][0]], True)
+        hits = writing_scoring.score_points(team, grabbed.points, grabbed.issues["perPoint"])["forbidden"]
+        expect("and counted against the story", hits, [{"point": 0, "term": "led"}])
+        Script.replies = [{"points": [point("Rebuilt the mobile app in Flutter as part of a six-person team", "gt_k1", "gt_k2")]}]
+        honest = writer.write(team_facts, team["entry"])
+        expect("team phrasing passes", honest.clean, True)
+
+        # --- repair: the model sees the exact complaint, only that point is rewritten ---
+        Script.replies, Script.seen = [{"points": [point("Reduced double bookings after locking slots", "gt_k3", "gt_k4")]}], []
+        complaint = [{"code": "number_not_in_facts", "message": "Number not in the cited facts: 90."}]
+        fixed = writer.repair_point(point("Cut double bookings by 90%", "gt_k4"), complaint, booking_facts, booking["entry"])
+        sent = Script.seen[0][-1]["content"]
+        expect("repair shows the point and the complaint", ("Cut double bookings by 90%" in sent, "Number not in the cited facts: 90." in sent), (True, True))
+        expect("repair also gets the facts", "[gt_k4]" in Script.seen[0][1]["content"], True)
+        expect("repaired point is clean", (fixed.ok, fixed.clean, len(fixed.points)), (True, True, 1))
+
+        # --- unusable replies are failed steps ---
+        Script.replies = ["not json", "still not json"]
+        failed = writer.write(booking_facts, booking["entry"])
+        expect("garbage reply", (failed.ok, failed.points, bool(failed.error), failed.clean), (False, [], True, False))
+        Script.replies = [{"points": [{"content": "   ", "supportedBy": ["gt_k1"]}]}]
+        blank = writer.write(booking_facts, booking["entry"])
+        expect("blank points are dropped, an empty draft is flagged",
+               (blank.points, [i["code"] for i in blank.issues["listIssues"]]), ([], ["no_points"]))
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+
+    # --- ground truth facts and the summary maths ---
+    expect("one ground-truth fact per phrase", len(booking_facts), len(booking["mustCapture"]))
+    expect("ground-truth facts are grounded", rules_kept_all(booking), True)
+    mixed = writing_scoring.summarize_points([
+        {"points": 3, "invented": 0, "stylePassRate": 1.0, "forbidden": []},
+        {"points": 1, "invented": 1, "stylePassRate": 0.0, "forbidden": [{"point": 0, "term": "x"}]},
+    ])
+    expect("rates are over all points", (mixed["points"], mixed["inventionRate"], mixed["stylePassRate"], mixed["forbiddenHits"]), (4, 0.25, 0.75, 1))
+    expect("prompt version", len(writer.PROMPT_VERSION), 8)
+
+    ok = not problems
+    print(f"writer: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_checker() -> bool:
+    import writing_scoring
+    from writing import checker, models
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    facts = [
+        {"id": "f1", "content": "Added a cache in front of the search endpoint", "owner": "me"},
+        {"id": "f2", "content": "The team migrated the database to Postgres", "owner": "team"},
+    ]
+    points = [
+        {"content": "Added a cache in front of the search endpoint", "supportedBy": ["f1"]},
+        {"content": "Added a cache in front of the search endpoint, improving search performance for all users", "supportedBy": ["f1"]},
+        {"content": "Moved the database to MySQL", "supportedBy": ["f2"]},
+    ]
+
+    class Script:
+        replies: list = []
+        seen: list = []
+        failures: list = []
+
+        def complete(self, model, messages, temperature):
+            Script.seen.append((messages, temperature))
+            if Script.failures:
+                raise Script.failures.pop(0)
+            reply = Script.replies.pop(0)
+            return (json.dumps(reply) if not isinstance(reply, str) else reply), 90, 60
+
+    def verdict(index, kind, offending=(), reason="r"):
+        return {"index": index, "verdict": kind, "offending": list(offending), "reason": reason}
+
+    saved_env = {k: os.environ.pop(k, None) for k in ("CHECKER_MODEL", "ANALYST_MODEL", "WRITER_MODEL")}
+    real_adapter = models.ADAPTERS["openai"]
+    models.ADAPTERS["openai"] = Script
+    try:
+        # --- what the model is shown, and the low temperature ---
+        Script.replies, Script.seen = [{"verdicts": [verdict(0, "backed"), verdict(1, "overstated", ["for all users"]), verdict(2, "unsupported", ["MySQL"])]}], []
+        review = checker.check(points, facts)
+        messages, temperature = Script.seen[0]
+        expect("instructions", "You are the checker" in messages[0]["content"], True)
+        expect("facts and points shown with citations",
+               ("[f1] (owner: me) Added a cache" in messages[1]["content"], "1: Added a cache in front of the search endpoint, improving search performance for all users  (cites: f1)" in messages[1]["content"]),
+               (True, True))
+        expect("checker runs at temperature 0", temperature, 0.0)
+
+        # --- a normal review ---
+        expect("review ok", (review.ok, [v["verdict"] for v in review.verdicts]), (True, ["backed", "overstated", "unsupported"]))
+        expect("offending words kept", [v["offending"] for v in review.verdicts], [[], ["for all users"], ["MySQL"]])
+        expect("all located", all(v["located"] for v in review.verdicts), True)
+        expect("one request for all points", len(Script.seen), 1)
+
+        # --- the model's words are checked before they are believed ---
+        Script.replies = [{"verdicts": [verdict(0, "backed"), verdict(1, "overstated", ["enterprise scale", "FOR ALL USERS"]), verdict(2, "OVERSTATED", ["Postgres is wrong"])]}]
+        careful = checker.check(points, facts)
+        expect("invented offending words are ignored", [v["offending"] for v in careful.verdicts], [[], ["FOR ALL USERS"], []])
+        expect("verdict kept but marked as not located", [v["located"] for v in careful.verdicts], [True, True, False])
+        expect("verdict words are tidied", careful.verdicts[2]["verdict"], "overstated")
+
+        # --- a reply that does not cover the points is a failed step ---
+        for label, bad in (
+            ("missing verdict", {"verdicts": [verdict(0, "backed"), verdict(1, "backed")]}),
+            ("repeated index", {"verdicts": [verdict(0, "backed"), verdict(0, "backed"), verdict(1, "backed"), verdict(2, "backed")]}),
+            ("index out of range", {"verdicts": [verdict(0, "backed"), verdict(1, "backed"), verdict(5, "backed")]}),
+            ("unknown verdict", {"verdicts": [verdict(0, "backed"), verdict(1, "great"), verdict(2, "backed")]}),
+            ("wrong shape", {"nothing": 1}),
+        ):
+            Script.replies = [bad, bad]
+            failed = checker.check(points, facts)
+            expect(label, (failed.ok, failed.verdicts, bool(failed.error)), (False, [], True))
+        Script.replies = ["not json", "not json"]
+        expect("garbage", checker.check(points, facts).ok, False)
+
+        # --- the checker can only tighten ---
+        flagged = [[], [], [{"code": "tool_not_in_facts", "message": "\"MySQL\" is not in the cited facts."}]]
+        Script.replies = [{"verdicts": [verdict(0, "backed"), verdict(1, "backed"), verdict(2, "backed")]}]
+        floor = checker.check(points, facts, flagged)
+        expect("a rule-flagged point cannot be cleared", [v["final"] for v in floor.verdicts], ["backed", "backed", "overstated"])
+        expect("the checker's own verdict is kept visible", floor.verdicts[2]["verdict"], "backed")
+        expect("the reason comes from the rule", floor.verdicts[2]["reason"], "\"MySQL\" is not in the cited facts.")
+        Script.replies = [{"verdicts": [verdict(0, "backed"), verdict(1, "overstated", ["for all users"]), verdict(2, "backed")]}]
+        style_only = checker.check(points, facts, [[{"code": "weak_start", "message": "m"}], [], []])
+        expect("a style issue does not stop a backed verdict", style_only.verdicts[0]["final"], "backed")
+        expect("checker can still add a problem", style_only.verdicts[1]["final"], "overstated")
+
+        # --- temperature: set for steady jobs, dropped automatically if a model refuses it ---
+        Script.replies, Script.seen = [{"facts": []}], []
+        models.complete_json("analyst", [], analyst_shape())
+        expect("analyst at a low temperature", Script.seen[0][1], 0.2)
+        Script.replies, Script.seen = [{"facts": []}], []
+        models.complete_json("writer", [], analyst_shape())
+        expect("writer at the model default", Script.seen[0][1], None)
+        Script.replies, Script.seen = [{"facts": []}], []
+        Script.failures = [RuntimeError("Unsupported value: 'temperature' does not support 0.2")]
+        refused = models.complete_json("analyst", [], analyst_shape())
+        expect("refused temperature is dropped and asked again", (refused.ok, refused.attempts, [t for _m, t in Script.seen]), (True, 1, [0.2, None]))
+        Script.replies, Script.seen = [{"facts": []}], []
+        Script.failures = [RuntimeError("service down")]
+        expect("other errors still fail the step", models.complete_json("analyst", [], analyst_shape()).ok, False)
+
+        # --- scoring the checker on the real trap set, with three fake checkers ---
+        traps = writing_scoring.load_traps(ROOT / "evals" / "writing" / "traps.json")
+        label_of = {t["point"]: t["label"] for t in traps}
+
+        def fake(decide):
+            def check_fn(pts, fcts, issues):
+                kind = decide(label_of[pts[0]["content"]])
+                return checker.Review(ok=True, verdicts=[{"verdict": kind}])
+            return check_fn
+
+        blind = writing_scoring.score_checker(writing_scoring.trap_rows(traps, fake(lambda l: "backed")))
+        expect("rules alone catch 4 of 6", (blind["exaggerated"], blind["caughtByRules"], blind["caughtByEither"]), (6, 0.667, 0.667))
+        expect("blind checker adds nothing", blind["caughtByChecker"], 0.0)
+        expect("the two known gaps get through", sorted(blind["missedByBoth"]), ["t5_overstated_scope", "t6_unstated_result"])
+        expect("rules wrongly reject no honest point", blind["wronglyRejectedByRules"], 0.0)
+        sharp = writing_scoring.score_checker(writing_scoring.trap_rows(traps, fake(lambda l: "backed" if l == "honest" else "overstated")))
+        expect("sharp checker closes the gaps", (sharp["caughtByChecker"], sharp["caughtByEither"], sharp["missedByBoth"], sharp["wronglyRejectedByEither"]), (1.0, 1.0, [], 0.0))
+        paranoid = writing_scoring.score_checker(writing_scoring.trap_rows(traps, fake(lambda l: "overstated")))
+        expect("paranoid checker catches all but rejects honest points", (paranoid["caughtByEither"], paranoid["wronglyRejectedByChecker"], paranoid["wronglyRejectedByEither"]), (1.0, 1.0, 1.0))
+        broken = writing_scoring.score_checker(writing_scoring.trap_rows(traps, lambda p, f, i: checker.Review(ok=False)))
+        expect("failed checker steps are counted", broken["checkerFailedSteps"], 12)
+        expect("and the rules still stand alone", broken["caughtByEither"], 0.667)
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+        for key, value in saved_env.items():
+            if value is not None:
+                os.environ[key] = value
+
+    expect("prompt version", len(checker.PROMPT_VERSION), 8)
+    ok = not problems
+    print(f"checker: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_pipeline() -> bool:
+    import writing_scoring
+    from writing import models, pipeline
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    case = json.loads((ROOT / "evals" / "writing" / "cases" / "rambling_product.json").read_text())
+    story, entry = case["story"], case["entry"]
+
+    class Team:
+        """A fake model that tells the three jobs apart and replays scripted replies."""
+
+        analyst: list = []
+        writer: list = []
+        repair: list = []
+        checker: list = []
+        calls: list = []
+
+        def complete(self, model, messages, temperature):
+            system, user = messages[0]["content"], messages[-1]["content"]
+            job = ("analyst" if "You are the analyst" in system else
+                   "checker" if "You are the checker" in system else "writer")
+            if job == "writer" and user.startswith("Fix this one point."):
+                job = "repair"
+            Team.calls.append(job)
+            queue = getattr(Team, job)
+            reply = queue.pop(0) if queue else Team.default(job, messages)
+            return (json.dumps(reply) if not isinstance(reply, str) else reply), 100, 50
+
+        @staticmethod
+        def default(job, messages):
+            if job == "checker":
+                count = len(re.findall(r"^\d+:", messages[-1]["content"], flags=re.M))
+                return {"verdicts": [{"index": i, "verdict": "backed", "offending": [], "reason": "ok"} for i in range(count)]}
+            raise AssertionError(f"no scripted reply for {job}")
+
+    def analyst_reply(picks=None):
+        picks = case["mustCapture"] if picks is None else picks
+        return {"facts": [{"content": k["phrase"], "kind": k["kind"], "owner": k["owner"], "quote": k["phrase"]} for k in picks], "missing": ["How many salons?"]}
+
+    def fact_ids():
+        # The analyst's fact ids come from the story and the quotes, so they are known in
+        # advance. Scripted writer replies cite them.
+        from writing import analyst as analyst_module
+        from writing import rules
+
+        kept, _ = rules.check_facts(analyst_reply()["facts"], story)
+        return [analyst_module._fact_id(f) for f in kept]
+
+    def run(**scripts):
+        for name in ("analyst", "writer", "repair", "checker"):
+            setattr(Team, name, list(scripts.get(name, [])))
+        Team.calls = []
+        return pipeline.run_pipeline(story, entry)
+
+    def pt(content, *indexes):
+        return {"content": content, "supportedBy": [Team.last_ids[i] for i in indexes]}
+
+    def ok_verdicts(count, overrides=None):
+        overrides = overrides or {}
+        return {"verdicts": [
+            overrides.get(i, {"index": i, "verdict": "backed", "offending": [], "reason": "ok"})
+            for i in range(count)
+        ]}
+
+    def counts():
+        return {job: Team.calls.count(job) for job in ("analyst", "writer", "repair", "checker")}
+
+    real_adapter = models.ADAPTERS["openai"]
+    models.ADAPTERS["openai"] = Team
+    try:
+        Team.last_ids = fact_ids()
+        clean_points = lambda: [pt("Built the booking page in React", 0), pt("Fixed double bookings by locking the slot during checkout", 2), pt("Stopped the angry emails about double bookings", 3)]
+
+        # --- a clean run: three calls, everything supported ---
+        r = run(analyst=[analyst_reply()], writer=[{"points": clean_points()}])
+        expect("clean run", (r.ok, r.stage, [p["status"] for p in r.points]), (True, "done", ["supported"] * 3))
+        expect("clean run uses one call per job", counts(), {"analyst": 1, "writer": 1, "repair": 0, "checker": 1})
+        expect("points cite real fact ids", all(f in {x["id"] for x in r.facts} for p in r.points for f in p["supportedBy"]), True)
+        expect("follow-up question passed along", r.missing, ["How many salons?"])
+        expect("run record totals", (r.totals["steps"], r.totals["inputTokens"], r.totals["unpricedSteps"]), (3, 300, 0))
+        expect("cost is counted", r.totals["costUsd"] > 0, True)
+        expect("prompt versions recorded", sorted(r.prompt_versions), ["analyst", "checker", "writer"])
+        expect("points have no ids yet and are marked ai", all("id" not in p and p["origin"] == "ai" and not p["fallback"] for p in r.points), True)
+
+        # --- the rules catch an invented number; one repair fixes it ---
+        bad = clean_points(); bad[2] = pt("Cut double bookings by 90%", 3)
+        r = run(analyst=[analyst_reply()], writer=[{"points": bad}],
+                repair=[{"points": [pt("Stopped the angry emails about double bookings", 3)]}])
+        expect("repaired", [p["status"] for p in r.points], ["supported"] * 3)
+        expect("one repair, two checker calls", counts(), {"analyst": 1, "writer": 1, "repair": 1, "checker": 2})
+
+        # --- the checker catches what code cannot; repair fixes it ---
+        gap = clean_points(); gap[1] = pt("Fixed double bookings, improving booking performance for all users", 2)
+        r = run(analyst=[analyst_reply()], writer=[{"points": gap}],
+                checker=[ok_verdicts(3, {1: {"index": 1, "verdict": "overstated", "offending": ["for all users"], "reason": "no result stated"}})],
+                repair=[{"points": [pt("Fixed double bookings by locking the slot during checkout", 2)]}])
+        expect("checker complaint repaired", [p["status"] for p in r.points], ["supported"] * 3)
+        expect("repair prompt carried the checker's complaint", counts()["repair"], 1)
+
+        # --- never fixed: two repair rounds, then a plain safe point marked for review ---
+        stubborn = [{"points": [pt("Built the booking page in React and Kafka", 0)]}] * 2
+        r = run(analyst=[analyst_reply()], writer=[{"points": [pt("Built the booking page in React and Kafka", 0), pt("Fixed double bookings by locking the slot during checkout", 2)]}], repair=stubborn)
+        expect("fallback point", [(p["content"], p["status"], p["fallback"]) for p in r.points],
+               [("Built the booking page in React", "needs_review", True), ("Fixed double bookings by locking the slot during checkout", "supported", False)])
+        expect("fallback keeps the original complaint", [i["code"] for i in r.points[0]["issues"]], ["tool_not_in_facts"])
+        expect("at most two repair rounds", (counts()["repair"], counts()["checker"]), (2, 3))
+
+        # --- no safe version possible: the point is left out and recorded ---
+        r = run(analyst=[analyst_reply()], writer=[{"points": [pt("Built the whole stack with Kafka", 1)]}],
+                repair=[{"points": [pt("Built the whole stack with Kafka", 1)]}] * 2)
+        expect("unfixable point is dropped", (r.points, [d["reason"] for d in r.dropped_points]), ([], ["no safe version could be built from its fact"]))
+
+        # --- the checker is down: points are unchecked, never supported ---
+        r = run(analyst=[analyst_reply()], writer=[{"points": clean_points()}], checker=["garbage", "garbage"])
+        expect("unchecked", [p["status"] for p in r.points], ["unchecked"] * 3)
+        expect("and says why", r.points[0]["issues"][0]["code"], "checker_unavailable")
+        expect("a failed checker does not trigger repairs", counts()["repair"], 0)
+
+        # --- earlier stages failing ---
+        r = run(analyst=["garbage", "garbage"])
+        expect("analyst fails", (r.ok, r.stage, r.points, counts()["writer"]), (False, "analyst", [], 0))
+        r = run(analyst=[{"facts": [], "missing": ["What did you build?", "Who used it?"]}])
+        expect("nothing to write from", (r.ok, r.stage, counts()["writer"], r.missing), (True, "no_facts", 0, ["What did you build?", "Who used it?"]))
+        r = run(analyst=[analyst_reply()], writer=["garbage", "garbage"])
+        expect("writer fails", (r.ok, r.stage, counts()["checker"]), (False, "writer", 0))
+        r = run(analyst=[analyst_reply()], writer=[{"points": []}])
+        expect("writer writes nothing", (r.ok, r.stage), (False, "writer"))
+
+        # --- the list is tidied by code: repeats and extras never reach the checker ---
+        many = [pt(f"Built booking page number {n} in React", 0) for n in range(7)] + [pt("Built booking page number 0 in React", 0)]
+        r = run(analyst=[analyst_reply()], writer=[{"points": many}])
+        expect("capped at five", len(r.points), 5)
+        expect("repeats and extras recorded", sorted(d["reason"] for d in r.dropped_points), ["more than the limit", "more than the limit", "repeated point"])
+
+        # --- guards: refused before any model is called ---
+        for label, text in (("empty story", "   "), ("too long", "x" * (pipeline.MAX_STORY_CHARS + 1))):
+            Team.calls = []
+            r = pipeline.run_pipeline([{"id": "c1", "text": text}], entry)
+            expect(label, (r.ok, r.stage, Team.calls, bool(r.error)), (False, "guard", [], True))
+
+        # --- the number of calls is bounded however badly the model behaves ---
+        worst_writer = {"points": [pt(f"Built booking page number {n} in React and Kafka", 0) for n in range(5)]}
+        r = run(analyst=[analyst_reply()], writer=[worst_writer],
+                repair=[{"points": [pt("Built booking page again in React and Kafka", 0)]}] * 10,
+                checker=[ok_verdicts(5, {i: {"index": i, "verdict": "overstated", "offending": [], "reason": "x"} for i in range(5)})] * 3)
+        calls = counts()
+        expect("bounded calls", (calls["analyst"], calls["writer"], calls["checker"] <= 3, calls["repair"] <= 5 * pipeline.MAX_REPAIR_ROUNDS), (1, 1, True, True))
+        expect("worst case still ends cleanly", r.ok, True)
+
+        # --- plain points ---
+        expect("plain point", (pipeline.plain_point({"content": "I built the booking page in React."}), pipeline.plain_point({"content": "We've moved to Postgres"})), ("Built the booking page in React", "Moved to Postgres"))
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+
+    ok = not problems
+    print(f"pipeline: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_writing_report() -> bool:
+    import run_writing_evals as report_tool
+    import writing_baseline
+    import writing_scoring
+    from writing import analyst as analyst_module
+    from writing import models, rules
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    cases = {c["id"]: c for c in report_tool.load_cases()}
+    two = [cases["rambling_product"], cases["we_versus_i_team"]]
+    traps = writing_scoring.load_traps(ROOT / "evals" / "writing" / "traps.json")
+    label_of = {t["point"]: t["label"] for t in traps}
+
+    # What each fake team writes: hand-made honest points for the two stories.
+    def ids(case):
+        kept, _ = rules.check_facts(
+            [{"content": k["phrase"], "kind": k["kind"], "owner": k["owner"], "quote": k["phrase"]} for k in case["mustCapture"]],
+            case["story"])
+        return [analyst_module._fact_id(f) for f in kept]
+
+    honest = {
+        "rambling_product": [
+            ("Built the booking page in React", [0]),
+            ("Fixed double bookings by locking the slot during checkout", [2]),
+            ("Stopped the angry emails about double bookings", [3]),
+        ],
+        "we_versus_i_team": [
+            ("Rebuilt the mobile app in Flutter as part of a six-person team", [0, 1]),
+            ("Developed the login and onboarding screens", [2]),
+            ("Wrote the tests for the login and onboarding screens", [3]),
+        ],
+    }
+
+    class Team:
+        mode = "honest"  # or "inventive"
+
+        def complete(self, model, messages, temperature):
+            system, user = messages[0]["content"], messages[-1]["content"]
+            case = next(c for c in two if c["story"][0]["text"][:40] in messages[1]["content"]) if "STORY:" in messages[1]["content"] else Team.current
+            Team.current = case
+            if "You are the analyst" in system:
+                reply = {"facts": [{"content": k["phrase"], "kind": k["kind"], "owner": k["owner"], "quote": k["phrase"]} for k in case["mustCapture"]], "missing": ["How big was it?"]}
+            elif "You are the checker" in system:
+                count = len(re.findall(r"^\d+:", user, flags=re.M))
+                reply = {"verdicts": [{"index": i, "verdict": "backed", "offending": [], "reason": "ok"} for i in range(count)]}
+                if "FACTS:" in user and count == 1 and user.count("\n") < 6 and Team.trap:
+                    kind = "backed" if label_of.get(Team.trap_point(user)) == "honest" else "overstated"
+                    reply["verdicts"][0]["verdict"] = kind
+                    if kind != "backed":
+                        reply["verdicts"][0]["offending"] = []
+            else:  # writer or repair
+                if Team.mode == "inventive":
+                    texts = [(p + " with Kafka", c) for p, c in honest[case["id"]]]
+                else:
+                    texts = honest[case["id"]]
+                fact_ids = ids(case)
+                reply = {"points": [{"content": t, "supportedBy": [fact_ids[i] for i in cites]} for t, cites in texts]}
+                if user.startswith("Fix this one point."):
+                    reply = {"points": reply["points"][:1]}
+            return json.dumps(reply), 100, 50
+
+        current = None
+        trap = False
+
+        @staticmethod
+        def trap_point(user):
+            # An honest trap point is a prefix of its exaggerated twin, so take the longest match.
+            return max((p for p in label_of if p in user), key=len, default="")
+
+    class Tidy:
+        """A fake of today's one-pass tidy-up that sometimes invents."""
+        class responses:
+            @staticmethod
+            def create(**_kwargs):
+                class Out:
+                    output_text = json.dumps({"bullets": ["Built the booking page in React", "Cut double bookings by 90% using Redis"]})
+                return Out()
+
+    import enrichment
+    real_adapter, real_client = models.ADAPTERS["openai"], enrichment.client
+    models.ADAPTERS["openai"] = Team
+    enrichment.client = Tidy
+    saved_env = {k: os.environ.pop(k, None) for k in ("ANALYST_MODEL", "WRITER_MODEL", "CHECKER_MODEL")}
+    try:
+        # --- nothing is read at import; main() is what loads settings ---
+        source = (ROOT / "evals" / "run_writing_evals.py").read_text()
+        inside_main = ast.get_source_segment(source, next(
+            n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "main"))
+        outside_main = source.replace(inside_main, "")
+        expect("settings are loaded only inside main()", ("load_dotenv(" in inside_main, "load_dotenv(" in outside_main.replace("`", "")), (True, False))
+        expect("estimate-only by default", (report_tool.parse_args([]).yes, report_tool.parse_args(["--yes"]).yes), (False, True))
+        try:
+            report_tool.parse_args(["--runs", "0"])
+            problems.append("zero runs accepted")
+        except SystemExit:
+            pass
+
+        # --- a whole honest run, three times over ---
+        Team.mode = "honest"
+        report = report_tool.evaluate(two, [], runs=3)
+        json.dumps(report)  # must be storable
+        expect("stories and runs recorded", (report["meta"]["runs"], report["meta"]["stories"]), (3, ["rambling_product", "we_versus_i_team"]))
+        expect("models and prompt versions recorded", (sorted(report["meta"]["models"]), sorted(report["meta"]["promptVersions"])), (["analyst", "checker", "writer"], ["analyst", "checker", "writer"]))
+        expect("analyst finds everything", (report["analyst"]["recall"]["mean"], report["analyst"]["ownerRight"]["mean"]), (1.0, 1.0))
+        expect("honest team invents nothing", (report["team"]["inventionRate"]["mean"], report["team"]["inventionRateVsStory"]["mean"], report["team"]["forbiddenHits"]["mean"]), (0.0, 0.0, 0.0))
+        expect("all points supported, none fell back", (report["team"]["supportedRate"]["mean"], report["team"]["fallbackRate"]["mean"], report["team"]["failedStories"]["mean"]), (1.0, 0.0, 0))
+        expect("mean, lowest and highest", sorted(report["team"]["supportedRate"]), ["max", "mean", "min"])
+        expect("cost per entry is priced", (report["cost"]["usdPerEntry"]["mean"] > 0, report["cost"]["unpricedSteps"]["mean"]), (True, 0))
+        expect("follow-up questions laid beside what was expected", report["followUps"][0], {"story": "rambling_product", "asked": ["How big was it?"], "shouldAskAbout": cases["rambling_product"]["missing"]})
+        expect("per-story figures", [s["story"] for s in report["perStory"]], ["rambling_product", "we_versus_i_team"])
+        expect("sample points kept", report["samplePoints"]["we_versus_i_team"][0], "Rebuilt the mobile app in Flutter as part of a six-person team")
+
+        # --- today's tidy-up, judged by the same yardstick, invents ---
+        base = report["baseline"]
+        # The fake tidy-up gives both stories the same two bullets. On the booking story one of
+        # them invents "90%" and "Redis"; on the Flutter story neither bullet comes from the story.
+        expect("baseline invents (3 of 4 points have words the story never said)", base["inventionRateVsStory"]["mean"], 0.75)
+        expect("baseline is not costed", "not measured" in base["cost"], True)
+        expect("baseline can be skipped", report_tool.evaluate(two, [], runs=1, with_baseline=False)["baseline"], None)
+        expect("baseline sentences", writing_baseline.sentences(cases["very_short"]["story"]), ["Built a REST API in Django."])
+
+        # --- an inventive writer: repairs fail, the plain fallback keeps the stored points honest ---
+        Team.mode = "inventive"
+        sloppy = report_tool.evaluate(two, [], runs=1, with_baseline=False)
+        expect("fallback used", sloppy["team"]["fallbackRate"]["mean"] > 0, True)
+        expect("final points still invent nothing", sloppy["team"]["inventionRate"]["mean"], 0.0)
+        expect("but they need review", sloppy["team"]["needsReviewRate"]["mean"] > 0, True)
+        expect("repairs happen", sloppy["team"]["repairCallsPerStory"]["mean"] > 0, True)
+        Team.mode = "honest"
+
+        # --- the checker on the traps, through the same code ---
+        Team.trap = True
+        with_traps = report_tool.evaluate(two, traps, runs=2, with_baseline=False)
+        Team.trap = False
+        chk = with_traps["checker"]
+        expect("rules alone catch 4 of 6", chk["caughtByRules"]["mean"], 0.667)
+        expect("a checker that spots the rest closes the gap", (chk["caughtByEither"]["mean"], chk["wronglyRejectedByEither"]["mean"]), (1.0, 0.0))
+        expect("no honest point wrongly rejected", chk["wronglyRejectedByChecker"]["mean"], 0.0)
+        expect("nothing missed", chk["missedByBoth"], [])
+
+        # --- the regression gate ---
+        a = {"team": {"inventionRate": {"mean": 0.0}, "inventionRateVsStory": {"mean": 0.0}, "forbiddenHits": {"mean": 0.0}}}
+        b = {"team": {"inventionRate": {"mean": 0.1}, "inventionRateVsStory": {"mean": 0.0}, "forbiddenHits": {"mean": 1.0}}}
+        expect("worse invention is flagged", len(report_tool.compare(b, a)), 2)
+        expect("same is fine", report_tool.compare(a, a), [])
+        expect("better is fine", report_tool.compare(a, b), [])
+        expect("tolerance allows noise", report_tool.compare({"team": {**b["team"], "forbiddenHits": {"mean": 0.0}}}, a, tolerance=0.1), [])
+        expect("missing figures are not a regression", report_tool.compare({"team": {}}, a), [])
+
+        # --- the estimate says what a run would cost before it is made ---
+        plan = report_tool.estimate(list(cases.values()), traps, runs=3)
+        expect("estimate", (plan["calls"] > 0, plan["costUsd"] is not None and 0 < plan["costUsd"] < 5), (True, True))
+        unpriced = os.environ.get("WRITER_MODEL")
+        os.environ["WRITER_MODEL"] = "openai:model-with-no-price"
+        try:
+            expect("an unpriced model is admitted", report_tool.estimate(two, traps, 1)["costUsd"], None)
+        finally:
+            os.environ.pop("WRITER_MODEL", None)
+            if unpriced:
+                os.environ["WRITER_MODEL"] = unpriced
+        expect("stats ignore missing figures", report_tool.stats([1.0, None, 3.0]), {"mean": 2.0, "min": 1.0, "max": 3.0})
+        expect("stats of nothing", report_tool.stats([None]), None)
+    finally:
+        models.ADAPTERS["openai"] = real_adapter
+        enrichment.client = real_client
+        for key, value in saved_env.items():
+            if value is not None:
+                os.environ[key] = value
+
+    ok = not problems
+    print(f"writing_report: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def _written_result(second_status="needs_review", missing=()):
+    """A finished PipelineResult, as the writing team would hand it to be stored."""
+    from writing import models, pipeline, records
+
+    run = records.Run("writing team: test")
+    run.add(
+        models.Result(ok=True, job="writer", provider="openai", model="gpt-4.1-mini",
+                      input_tokens=10, output_tokens=5, replies=["write to sam@example.com"]),
+        [{"role": "user", "content": "mail sam@example.com"}], name="writer",
+    )
+    return pipeline.PipelineResult(
+        ok=True, stage="done", run=run, missing=list(missing),
+        prompt_versions={"analyst": "a", "writer": "w", "checker": "c"},
+        facts=[{"id": "fact_a", "content": "Built the booking page in React",
+                "kind": "action", "owner": "me",
+                "quote": "I built the booking page in React", "storyId": "s1"}],
+        points=[
+            {"content": "Built the booking page in React", "supportedBy": ["fact_a"],
+             "status": "supported", "issues": [], "origin": "ai", "fallback": False},
+            {"content": "Fixed double bookings", "supportedBy": ["fact_a"],
+             "status": second_status,
+             "issues": [] if second_status == "supported" else [{"code": "x", "message": "m"}],
+             "origin": "ai", "fallback": second_status != "supported"},
+        ],
+    )
+
+
+def _with_story(payload: dict, text: str, item_id: str = "exp_chaishots") -> dict:
+    payload = json.loads(json.dumps(payload))
+    for item in payload["inventory"]["sections"]["experience"]["items"]:
+        if item["id"] == item_id:
+            item["story"] = [{"id": "s1", "text": text, "source": "typed", "at": None}]
+    return payload
+
+
+def test_rewrite_storing() -> bool:
+    from datetime import datetime, timezone
+
+    from claims import points_for_item, set_item_points
+    from facts import add_fact
+    from writing import store
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    when = datetime(2026, 10, 27, tzinfo=timezone.utc)
+    base = update_basics_verified(_with_project(load_fixture("sample_career.json")))
+    base = _with_story(base, "I built the booking page in React. Fixed the double bookings.")
+    base = add_fact(base, "A fact the person typed", section="experience", item_id="exp_chaishots")
+    other_before = [p for p in base["claims"] if p.get("itemId") == "exp_hyrefox"]
+
+    result = _written_result()
+    stored = store.apply_result(base, "experience", "exp_chaishots", result, now=when)
+    points = points_for_item(stored, "experience", "exp_chaishots")
+    expect("points replaced by the checked ones", [(p["content"], p["status"], p["origin"]) for p in points],
+           [("Built the booking page in React", "supported", "ai"), ("Fixed double bookings", "needs_review", "ai")])
+    expect("points cite their facts", [p["supportedBy"] for p in points], [["fact_a"], ["fact_a"]])
+    expect("issues kept on the point", [i["code"] for i in points[1]["issues"]], ["x"])
+    expect("bullets copy follows the points", _copies_out_of_step(stored), [])
+    ai_facts = [f for f in stored["facts"] if f["source"] == "ai"]
+    expect("ai fact stored with labels", [(f["id"], f["kind"], f["owner"], f["quote"], f["storyId"]) for f in ai_facts],
+           [("fact_a", "action", "me", "I built the booking page in React", "s1")])
+    expect("the person's own fact is kept", any(f["content"] == "A fact the person typed" for f in stored["facts"]), True)
+    expect("other entries untouched", [p for p in stored["claims"] if p.get("itemId") == "exp_hyrefox"], other_before)
+    item = next(i for i in stored["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    expect("writing marker", (item["writing"]["status"], item["writing"]["storyFingerprint"], item["writing"]["lastRunAt"]),
+           ("needs_review", store.story_fingerprint(item["story"]), when.isoformat()))
+    # The save door normalizes before storing, so a stored record is a normalized one.
+    saved_form = normalize_payload(stored)
+    expect("stable once saved and reloaded", normalize_payload(saved_form), saved_form)
+    expect("saving loses no point", sorted(p["id"] for p in saved_form["claims"]), sorted(p["id"] for p in stored["claims"]))
+
+    again = store.apply_result(stored, "experience", "exp_chaishots", result, now=when)
+    expect("applying twice changes nothing", again, stored)
+    expect("no duplicate facts", len([f for f in again["facts"] if f["source"] == "ai"]), 1)
+
+    questioned = store.apply_result(base, "experience", "exp_chaishots", _written_result("supported", ["How many bookings?"]), now=when)
+    qitem = next(i for i in questioned["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    expect("all supported means ready", qitem["writing"]["status"], "ready")
+    expect("questions stored", [q["text"] for q in qitem["writing"]["questions"]], ["How many bookings?"])
+
+    # --- already written, and when the story changes ---
+    _item, level = store.find_level(stored, "experience", "exp_chaishots")
+    expect("unchanged story is already written", store.already_written(stored, "experience", "exp_chaishots", level), True)
+    edited = _with_story(stored, "A completely different story")
+    _item, level2 = store.find_level(edited, "experience", "exp_chaishots")
+    expect("changed story is not", store.already_written(edited, "experience", "exp_chaishots", level2), False)
+    _item, level0 = store.find_level(base, "experience", "exp_chaishots")
+    expect("never written is not", store.already_written(base, "experience", "exp_chaishots", level0), False)
+
+    # --- the person's own points are protected ---
+    mine = set_item_points(base, "experience", "exp_chaishots", ["I wrote this myself"], origin="user")
+    expect("user points detected", len(store.user_edited_points(mine, "experience", "exp_chaishots")), 1)
+    expect("ai points are not", store.user_edited_points(stored, "experience", "exp_chaishots"), [])
+
+    # --- a project inside a job is written on its own ---
+    inside = store.apply_result(base, "experience", "exp_chaishots", result, project_id="wp_rec", now=when)
+    expect("project points", [p["content"] for p in points_for_item(inside, "experience", "exp_chaishots", "wp_rec")],
+           ["Built the booking page in React", "Fixed double bookings"])
+    expect("job-level points untouched", [p["content"] for p in points_for_item(inside, "experience", "exp_chaishots")],
+           [p["content"] for p in points_for_item(base, "experience", "exp_chaishots")])
+    expect("project facts are the project's", [f["context"]["projectId"] for f in inside["facts"] if f["source"] == "ai"], ["wp_rec"])
+    expect("project copies in step", _copies_out_of_step(inside), [])
+
+    # --- bad requests and bad results ---
+    for label, call, kind in (
+        ("unknown section", lambda: store.find_level(base, "nope", "x"), KeyError),
+        ("unknown item", lambda: store.find_level(base, "experience", "nope"), KeyError),
+        ("unknown project", lambda: store.find_level(base, "experience", "exp_chaishots", "nope"), KeyError),
+        ("section without points", lambda: store.find_level(base, "education", "x"), ValueError),
+        ("details length", lambda: set_item_points(base, "experience", "exp_chaishots", ["a", "b"], details=[{}]), ValueError),
+        ("details status", lambda: set_item_points(base, "experience", "exp_chaishots", ["a"], details=[{"status": "great"}]), ValueError),
+    ):
+        expect(label, _raises(call, kind), True)
+    failed = _written_result(); failed.ok = False
+    expect("a failed result stores nothing", store.apply_result(base, "experience", "exp_chaishots", failed), base)
+    empty = _written_result(); empty.points = []
+    expect("a result without points stores nothing", store.apply_result(base, "experience", "exp_chaishots", empty), base)
+
+    ok = not problems
+    print(f"rewrite_storing: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def update_basics_verified(payload: dict) -> dict:
+    from resume_ops import update_basics
+
+    return update_basics(payload, {"fullName": "Sam", "email": "sam@example.com", "phone": "", "location": ""}, verify=True)
+
+
+def test_rewrite_endpoint() -> bool:
+    import main
+    from fastapi import HTTPException
+    from writing import pipeline, store
+
+    problems: list[str] = []
+
+    def expect(label: str, got, want) -> None:
+        if got != want:
+            problems.append(f"{label}: got {got!r}, wanted {want!r}")
+
+    class Db(_FakeCursor):
+        """A scripted database: answers the endpoint's queries and records its writes."""
+
+        def __init__(self, payload, latest=None, traces=0):
+            super().__init__(version=4)
+            self.payload, self.latest, self.traces = payload, latest, traces
+            self.committed = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def cursor(self):
+            return self
+
+        def commit(self):
+            self.committed += 1
+
+        def execute(self, sql, params=()):
+            text = " ".join(sql.split())
+            if text.startswith("SELECT session_id, payload, version, user_id"):
+                self.statements.append((text, params))
+                self._row = ("s", self.payload, 4, None)
+            elif text.startswith("SELECT count(*) FROM ai_traces"):
+                self.statements.append((text, params))
+                self._row = (self.traces,)
+            elif text.startswith("INSERT INTO ai_traces"):
+                self.statements.append((text, params))
+                self._row = (7,)
+            elif text.endswith("FOR UPDATE"):
+                self.statements.append((text, params))
+                self._row = ("s", self.latest or self.payload, 4)
+            else:
+                super().execute(sql, params)
+
+    base = _with_story(
+        update_basics_verified(_with_project(load_fixture("sample_career.json"))),
+        "I built the booking page in React. Reach me at sam@example.com",
+    )
+    called: list = []
+
+    def attempt(payload, result, latest=None, traces=0, **body):
+        db = Db(payload, latest, traces)
+        called.clear()
+
+        def fake_pipeline(story, entry):
+            called.append((story, entry))
+            return result
+
+        real = (main.psycopg.connect, main.get_current_user, main.writing_pipeline.run_pipeline)
+        main.psycopg.connect = lambda *_a, **_k: db
+        main.get_current_user = lambda request: None
+        main.writing_pipeline.run_pipeline = fake_pipeline
+        try:
+            request = {"section": "experience", "itemId": "exp_chaishots", **body}
+            try:
+                return main.rewrite_entry("s", main.RewriteBody(**request), request=None), db
+            except HTTPException as err:
+                return err, db
+        finally:
+            main.psycopg.connect, main.get_current_user, main.writing_pipeline.run_pipeline = real
+
+    def wrote(db):
+        return len(db.ran("UPDATE resume_snapshots"))
+
+    def traced(db):
+        return db.ran("INSERT INTO ai_traces")
+
+    # --- a normal rewrite ---
+    out, db = attempt(base, _written_result())
+    expect("success", (isinstance(out, dict), out.get("version") if isinstance(out, dict) else out), (True, 5))
+    expect("model never got more than the entry's story and names",
+           (called[0][0][0]["text"].startswith("I built"), called[0][1].get("company")), (True, "ChaiShots"))
+    expect("saved once, through the door, with history", (wrote(db), [h[4] for h in db.ran("INSERT INTO career_versions")]),
+           (1, ["Entry rewritten by the writing team"]))
+    expect("undo copy kept", len(db.ran("INSERT INTO resume_undo")), 1)
+    expect("row locked before writing", len([t for t, _ in db.statements if t.endswith("FOR UPDATE")]), 1)
+    stored = json.loads(db.ran("UPDATE resume_snapshots")[0][0])
+    expect("stored points", [(p["content"], p["status"]) for p in points_for_item(stored, "experience", "exp_chaishots")],
+           [("Built the booking page in React", "supported"), ("Fixed double bookings", "needs_review")])
+    expect("reply summarises", (out["rewrite"]["stage"], [p["status"] for p in out["rewrite"]["points"]]), ("done", ["supported", "needs_review"]))
+    expect("one run record", len(traced(db)), 1)
+    record = traced(db)[0]
+    expect("run record type", record[1], "rewrite")
+    expect("no contact details in the run record", "sam@example.com" in (record[2] or "") + record[3], False)
+    expect("committed", db.committed >= 1, True)
+
+    # --- unchanged story is skipped; force and a changed story run again ---
+    written = store.apply_result(base, "experience", "exp_chaishots", _written_result())
+    out, db = attempt(written, _written_result())
+    expect("unchanged story skipped", (out.get("skipped"), called, traced(db), wrote(db)), (True, [], [], 0))
+    out, db = attempt(written, _written_result(), force=True)
+    expect("force runs again", (len(called), wrote(db)), (1, 1))
+
+    # --- limits and refusals ---
+    out, db = attempt(base, _written_result(), traces=pipeline.MAX_REWRITES_PER_HOUR)
+    expect("hourly limit", (getattr(out, "status_code", None), called, wrote(db)), (429, [], 0))
+    out, db = attempt(base, _written_result(), traces=pipeline.MAX_REWRITES_PER_HOUR - 1)
+    expect("just under the limit runs", isinstance(out, dict), True)
+    guard = pipeline.PipelineResult(ok=False, stage="guard", error="The story is empty.", run=_written_result().run)
+    out, db = attempt(base, guard)
+    expect("guard refusal: 400 and nothing recorded", (out.status_code, out.detail, traced(db), wrote(db)), (400, "The story is empty.", [], 0))
+    mine = set_item_points_user(base)
+    out, db = attempt(mine, _written_result())
+    expect("the person's own points are protected", (out.status_code, called, wrote(db)), (409, [], 0))
+    out, db = attempt(mine, _written_result(), replaceEdited=True)
+    expect("unless they agree", (isinstance(out, dict), wrote(db)), (True, 1))
+    out, db = attempt(base, _written_result(), itemId="nope")
+    expect("unknown entry", out.status_code, 404)
+    out, db = attempt(base, _written_result(), projectId="nope")
+    expect("unknown project", out.status_code, 404)
+    unverified = json.loads(json.dumps(base)); unverified["intake"]["basicsVerified"] = False; unverified["intake"]["basicsConfirmed"] = False
+    out, db = attempt(unverified, _written_result())
+    expect("details not confirmed", (out.status_code, called), (400, []))
+
+    # --- the team fails, or has nothing to write ---
+    failed = _written_result(); failed.ok, failed.stage, failed.error, failed.points = False, "analyst", "no key", []
+    out, db = attempt(base, failed)
+    expect("team failure: 502, spend recorded, nothing stored", (out.status_code, len(traced(db)), wrote(db), db.committed >= 1), (502, 1, 0, True))
+    nothing = _written_result(missing=["What did you build?"]); nothing.stage, nothing.points, nothing.facts = "no_facts", [], []
+    out, db = attempt(base, nothing)
+    expect("no facts: questions returned, nothing stored", (out["rewrite"]["questions"], wrote(db), len(traced(db))), (["What did you build?"], 0, 1))
+
+    # --- the entry changes while the team is writing ---
+    out, db = attempt(base, _written_result(), latest=_with_story(base, "A different story, typed meanwhile"))
+    expect("story changed meanwhile", (out.status_code, wrote(db), len(traced(db))), (409, 0, 1))
+    out, db = attempt(base, _written_result(), latest=set_item_points_user(base))
+    expect("person edited points meanwhile", (out.status_code, wrote(db)), (409, 0))
+
+    ok = not problems
+    print(f"rewrite_endpoint: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def set_item_points_user(payload: dict) -> dict:
+    from claims import set_item_points
+
+    return set_item_points(payload, "experience", "exp_chaishots", ["I wrote this myself"], origin="user")
+
+
+def analyst_shape():
+    from pydantic import BaseModel
+
+    class Shape(BaseModel):
+        facts: list[dict]
+
+    return Shape
+
+
+def rules_kept_all(case: dict) -> bool:
+    import writing_scoring
+    from writing import rules
+
+    kept, dropped = rules.check_facts(writing_scoring.ground_truth_facts(case), case["story"])
+    return len(kept) == len(case["mustCapture"]) and not dropped
+
+
 def _raises_text(call) -> str:
     try:
         call()
@@ -2384,6 +3872,17 @@ def main() -> int:
         test_contact_on_save_and_privacy,
         test_contact_background_lookups,
         test_project_link_checks,
+        test_model_switchboard,
+        test_cost_and_run_records,
+        test_writing_rules,
+        test_writing_cases_valid,
+        test_analyst,
+        test_writer,
+        test_checker,
+        test_pipeline,
+        test_writing_report,
+        test_rewrite_storing,
+        test_rewrite_endpoint,
         test_contact_status_and_gate,
         test_contact_exists_lookups,
         test_safe_fetch_refuses_dangerous_links,

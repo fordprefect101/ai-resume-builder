@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from facts import fact_by_id, search_facts
+from writing.rules import BOASTFUL_WORDS
 
 
 def _tokens(text: str) -> set[str]:
@@ -52,16 +53,8 @@ def verify_claim(payload: dict, claim_content: str, supported_by: list[str]) -> 
     coverage = len(overlap) / max(len(claim_tokens), 1)
 
     # Flag inflated language not in facts
-    inflation_words = {
-        "millions",
-        "billions",
-        "enterprise",
-        "large-scale",
-        "petabyte",
-        "global",
-    }
     claim_lower = content.lower()
-    for word in inflation_words:
+    for word in BOASTFUL_WORDS:
         if word in claim_lower and word not in " ".join(fact_tokens):
             return {
                 "status": "unsupported",

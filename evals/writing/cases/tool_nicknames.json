@@ -1,0 +1,21 @@
+{
+  "id": "tool_nicknames",
+  "profession": "tech",
+  "hardCase": "tools by nickname",
+  "entry": { "section": "experience", "title": "DevOps Engineer", "company": "Basalt Cloud" },
+  "story": [
+    {
+      "id": "c1",
+      "source": "typed",
+      "text": "Moved our services to k8s on GKE and set up the CI in GitHub Actions. Also got rid of the old pg box and moved the data into Cloud SQL. I wrote most of the helm charts."
+    }
+  ],
+  "mustCapture": [
+    { "id": "k1", "phrase": "Moved our services to k8s on GKE", "kind": "action", "owner": "team" },
+    { "id": "k2", "phrase": "set up the CI in GitHub Actions", "kind": "action", "owner": "unclear" },
+    { "id": "k3", "phrase": "moved the data into Cloud SQL", "kind": "action", "owner": "unclear" },
+    { "id": "k4", "phrase": "I wrote most of the helm charts", "kind": "action", "owner": "me" }
+  ],
+  "mustNotClaim": ["Terraform", "Jenkins", "AWS", "%", "led", "million"],
+  "missing": ["how many services", "what the move improved"]
+}

@@ -33,6 +33,9 @@ from contact import lookups as contact_lookups
 from contact import project_links
 from contact import status as contact_status
 from traces import get_trace, log_trace
+from writing import pipeline as writing_pipeline
+from writing import records as writing_records
+from writing import store as writing_store
 from versions import (
     ensure_base_schema,
     ensure_v2_schema,
@@ -167,6 +170,14 @@ class AddItemBody(BaseModel):
     itemId: str | None = None
     enrich: bool = True
     confirmedEmptyFields: list[str] = []
+
+
+class RewriteBody(BaseModel):
+    section: str
+    itemId: str
+    projectId: str | None = None
+    force: bool = False  # run again even though the story is unchanged
+    replaceEdited: bool = False  # allow replacing points the person wrote or edited
 
 
 class UpdateBasicsBody(BaseModel):
@@ -614,6 +625,138 @@ def tool_set_link_private(
         "payload": saved[1],
         "version": saved[2],
         "projectLinks": project_links.summary(saved[1]),
+    }
+
+
+def _rewrite_summary(result) -> dict:
+    return {
+        "stage": result.stage,
+        "points": [{"content": p["content"], "status": p["status"]} for p in result.points],
+        "droppedPoints": result.dropped_points,
+        "droppedFacts": len(result.dropped_facts),
+        "questions": result.missing,
+        "totals": result.totals,
+    }
+
+
+@app.post("/resume/{session_id}/rewrite")
+def rewrite_entry(session_id: str, body: RewriteBody, request: Request):
+    """Run the writing team on one entry's story and store the checked points.
+
+    Slow (several model calls), so it is never called from the live voice path. No
+    database connection is held while the models work.
+    """
+    user = get_current_user(request)
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, user)
+            payload = normalize_payload(row[1])
+            try:
+                require_basics_verified(payload)
+                item, level = writing_store.find_level(
+                    payload, body.section, body.itemId, body.projectId
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+            story = writing_store.level_story(level)
+            fingerprint = writing_store.story_fingerprint(story)
+            if (
+                writing_store.user_edited_points(payload, body.section, body.itemId, body.projectId)
+                and not body.replaceEdited
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This entry has points you wrote or edited. "
+                    "Confirm that they may be replaced.",
+                )
+            if not body.force and writing_store.already_written(
+                payload, body.section, body.itemId, level, body.projectId
+            ):
+                return {"sessionId": session_id, "version": row[2], "skipped": True,
+                        "reason": "The story has not changed since the points were written."}
+            cur.execute(
+                "SELECT count(*) FROM ai_traces WHERE session_id = %s "
+                "AND request_type = 'rewrite' AND created_at > now() - interval '1 hour'",
+                (session_id,),
+            )
+            if cur.fetchone()[0] >= writing_pipeline.MAX_REWRITES_PER_HOUR:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many rewrites this hour. Try again later.",
+                )
+
+    entry = writing_store.entry_for(item, level, body.section)
+    result = writing_pipeline.run_pipeline(story, entry)
+    if result.stage == "guard":  # refused before any model was called: nothing to record
+        raise HTTPException(status_code=400, detail=result.error)
+
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            trace = {**result.run.as_trace(), "stage": result.stage, "error": result.error[:300],
+                     "promptVersions": result.prompt_versions,
+                     "droppedFacts": len(result.dropped_facts),
+                     "droppedPoints": len(result.dropped_points)}
+            trace_id = log_trace(
+                cur, session_id, "rewrite",
+                writing_records.redact(" ".join(c.get("text", "") for c in story))[:500], trace,
+            )
+            if not result.ok:
+                conn.commit()  # the spend is recorded even though nothing is stored
+                raise HTTPException(status_code=502, detail=f"The writing team failed ({result.stage}): {result.error}")
+            if not result.points:
+                conn.commit()
+                return {"sessionId": session_id, "version": row[2], "traceId": trace_id,
+                        "rewrite": _rewrite_summary(result)}
+
+            cur.execute(
+                "SELECT session_id, payload, version FROM resume_snapshots "
+                "WHERE session_id = %s FOR UPDATE",
+                (session_id,),
+            )
+            latest = cur.fetchone()
+            previous = normalize_payload(latest[1])
+            try:
+                _item, now_level = writing_store.find_level(
+                    previous, body.section, body.itemId, body.projectId
+                )
+            except (KeyError, ValueError) as err:
+                conn.commit()
+                raise HTTPException(status_code=409, detail="The entry changed while it was being written.") from err
+            changed = writing_store.story_fingerprint(writing_store.level_story(now_level)) != fingerprint
+            edited_meanwhile = (
+                writing_store.user_edited_points(previous, body.section, body.itemId, body.projectId)
+                and not body.replaceEdited
+            )
+            if changed or edited_meanwhile:
+                conn.commit()
+                raise HTTPException(
+                    status_code=409,
+                    detail="The entry changed while it was being written. Run it again.",
+                )
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                writing_store.apply_result(
+                    previous, body.section, body.itemId, result, project_id=body.projectId
+                ),
+                operations=[{
+                    "type": "TOOL", "tool": "rewrite",
+                    "section": body.section, "itemId": body.itemId,
+                    "projectId": body.projectId,
+                }],
+                summary="Entry rewritten by the writing team",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "traceId": trace_id,
+        "rewrite": _rewrite_summary(result),
     }
 
 
