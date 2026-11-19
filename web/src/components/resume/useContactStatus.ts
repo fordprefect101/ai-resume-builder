@@ -42,11 +42,15 @@ export function useContactStatus(
   const [status, setStatus] = useState<ContactStatus | null>(null)
   const [projectLinks, setProjectLinks] = useState<ProjectLinks>({})
   const [error, setError] = useState('')
-  const [checking, setChecking] = useState(false)
+  // Checking until the lookups for the current savedKey have finished, or while a
+  // recheck runs.
+  const [checkedKey, setCheckedKey] = useState<string | null>(null)
+  const [rechecking, setRechecking] = useState(false)
+  const checking = checkedKey !== savedKey || rechecking
   const run = useRef(0)
 
   const poll = useCallback(
-    async (id: number) => {
+    async (id: number, key: string) => {
       for (let attempt = 0; attempt < MAX_POLLS; attempt += 1) {
         try {
           const next = await fetchContactStatus(sessionId)
@@ -63,7 +67,10 @@ export function useContactStatus(
         await new Promise((resolve) => window.setTimeout(resolve, POLL_MS))
         if (run.current !== id) return
       }
-      if (run.current === id) setChecking(false)
+      if (run.current === id) {
+        setCheckedKey(key)
+        setRechecking(false)
+      }
     },
     [sessionId]
   )
@@ -71,8 +78,7 @@ export function useContactStatus(
   useEffect(() => {
     run.current += 1
     const id = run.current
-    setChecking(true)
-    void poll(id)
+    void poll(id, savedKey)
     return () => {
       run.current += 1
     }
@@ -81,18 +87,18 @@ export function useContactStatus(
   const recheck = useCallback(async () => {
     run.current += 1
     const id = run.current
-    setChecking(true)
+    setRechecking(true)
     try {
       await recheckContactDetails(sessionId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the checks')
-      setChecking(false)
+      setRechecking(false)
       return
     }
     // Give the background run a moment before the first look.
     await new Promise((resolve) => window.setTimeout(resolve, 1500))
-    if (run.current === id) void poll(id)
-  }, [poll, sessionId])
+    if (run.current === id) void poll(id, savedKey)
+  }, [poll, savedKey, sessionId])
 
   return { status, projectLinks, error, checking, recheck, setProjectLinks }
 }

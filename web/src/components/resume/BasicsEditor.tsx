@@ -69,8 +69,10 @@ export function BasicsEditor({
   onDirtyChange,
 }: Props) {
   const saved = useMemo(() => formFromPayload(payload), [payload])
-  const [edited, setEdited] = useState<BasicsForm | null>(null)
-  const form = edited ?? saved
+  // Edits remember the saved details they started from, so they drop away by
+  // themselves when the saved details change.
+  const [edited, setEdited] = useState<{ base: BasicsForm; form: BasicsForm } | null>(null)
+  const form = edited?.base === saved ? edited.form : saved
   const verified = isBasicsVerified(payload)
   const dirty =
     form.fullName !== saved.fullName ||
@@ -82,15 +84,14 @@ export function BasicsEditor({
     form.portfolio !== saved.portfolio
 
   useEffect(() => {
-    setEdited(null)
-  }, [saved])
-
-  useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
 
   function update<K extends keyof BasicsForm>(key: K, value: BasicsForm[K]) {
-    setEdited((current) => ({ ...(current ?? saved), [key]: value }))
+    setEdited((current) => ({
+      base: saved,
+      form: { ...(current?.base === saved ? current.form : saved), [key]: value },
+    }))
   }
 
   const ready = Boolean(form.fullName.trim()) && !busy
