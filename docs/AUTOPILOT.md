@@ -200,3 +200,4 @@ with Parth, not by autopilot.
 - 2026-11-19 06:30 UTC — T1 done (autopilot). New voice-only tool `end_voice_session` (api/chat_tools.py `voice_tools_for_payload`, not in chat); instructions in api/realtime.py (`END_CALL_RULE`); browser waits for goodbye audio and running tools, then calls the button's stop. New eval `voice_can_end_call`. Evals 43/43, lint clean, build passes. Manual check added.
 - 2026-11-19 06:58 UTC — STARTED T2 (autopilot)
 - 2026-11-19 07:01 UTC — T2 done (autopilot). New api/story_chunks.py; add_item/add_project take storyTurns (voice) and the text chat stores the typed message (source typed); browser collects only the person's finished transcriptions and sends them with those two tools. Cap 4000 chars, newest kept; legacy chunks dropped once real words arrive. New eval `story_keeps_persons_words`. Evals 44/44, lint clean, build passes. Manual check added.
+- 2026-11-19 07:58 UTC — STARTED T3 (autopilot)
