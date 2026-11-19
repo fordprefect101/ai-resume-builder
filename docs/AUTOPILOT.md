@@ -197,3 +197,4 @@ with Parth, not by autopilot.
   Lint 0 errors, build passes, evals 42/42.
 - 2026-11-19 06:14 UTC — STARTED T1 (autopilot)
 - 2026-11-19 06:30 UTC — T1 done (autopilot). New voice-only tool `end_voice_session` (api/chat_tools.py `voice_tools_for_payload`, not in chat); instructions in api/realtime.py (`END_CALL_RULE`); browser waits for goodbye audio and running tools, then calls the button's stop. New eval `voice_can_end_call`. Evals 43/43, lint clean, build passes. Manual check added.
+- 2026-11-19 06:58 UTC — STARTED T2 (autopilot)
