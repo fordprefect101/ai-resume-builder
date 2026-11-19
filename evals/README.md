@@ -70,6 +70,7 @@ the stored record. It also confirms the server can start on an empty database, a
 | `voice_add_entry_end_to_end` | The voice add-entry request runs through the real code (stand-in database and OpenAI) and saves the entry |
 | `assistant_result_is_small_and_constant` | The 8 voice actions return a short `assistantResult` with the agreed fields; its size does not grow from a 2-job to a 20-job resume (search is capped) |
 | `live_path_guard` | No voice action calls an AI model or opens a connection (except add-entry's allowed tidy-up); every voice tool is covered; the browser sends only the short result |
+| `own_key` | A visitor's own key is used for its request only, never stored, redacted from errors, logs and traces, and not counted against the daily limit |
 | `single_save_door` | No code outside `_save_payload` / `_create_snapshot` writes a stored resume |
 | `example_record_is_current` | `api/resume-schema.example.json` is a valid, normalized v5 record with no duplicate keys and a project inside a job whose points are recorded as its own |
 | `env_example_lists_settings` | `api/.env.example` names every setting the API code reads |

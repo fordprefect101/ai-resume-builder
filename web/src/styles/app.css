@@ -1270,3 +1270,25 @@
     break-inside: avoid;
   }
 }
+
+.own-key-box,
+.own-key-chip {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  background: #fff;
+  border: 1px solid #c9ced6;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  font-size: 14px;
+}
+.own-key-box { max-width: 340px; padding: 14px; display: grid; gap: 8px; }
+.own-key-box p { margin: 0; }
+.own-key-box input { padding: 6px 8px; }
+.own-key-actions { display: flex; gap: 8px; }
+.own-key-chip { padding: 6px 10px; cursor: pointer; }
+@media print {
+  .own-key-box,
+  .own-key-chip { display: none !important; }
+}

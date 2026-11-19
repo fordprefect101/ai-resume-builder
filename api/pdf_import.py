@@ -5,14 +5,13 @@ import uuid
 from io import BytesIO
 
 from dotenv import load_dotenv
-from openai import OpenAI
 from pypdf import PdfReader
 
 from section_registry import BUILTIN_SECTION_ORDER, SECTION_REGISTRY
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from byok import api_key, client
 MODEL = os.getenv("OPENAI_CHAT_MODEL", os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini"))
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -216,7 +215,7 @@ def normalize_imported_payload(data: dict) -> dict:
 
 
 def structure_resume_text(text: str) -> dict:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         raise PdfImportError("OPENAI_API_KEY is not set", status_code=500)
 
     response = client.chat.completions.create(

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 
-from openai import OpenAI
 from dotenv import load_dotenv
 
 from context_selector import resume_context_summary, select_resume_context
@@ -13,7 +12,7 @@ from operations import OperationProposal
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from byok import api_key, client
 MODEL = os.getenv("OPENAI_CHAT_MODEL", os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini"))
 
 SYSTEM = """You translate user requests into structured career database operations.
@@ -51,7 +50,7 @@ Rules:
 
 def interpret_mutation(payload: dict, user_text: str) -> tuple[OperationProposal, dict]:
     """Returns proposal and trace metadata."""
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     context = select_resume_context(payload, user_text)

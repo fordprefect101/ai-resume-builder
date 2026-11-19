@@ -966,7 +966,7 @@ def _live_run(payload: dict, *, enrich: bool) -> tuple[dict, list, list]:
     patched = []
     for path in sorted((ROOT / "api").glob("*.py")):
         module = importlib.import_module(path.stem)
-        if hasattr(module, "client") and type(module.client).__name__ == "OpenAI":
+        if hasattr(module, "client") and type(module.client).__name__ in ("OpenAI", "_RequestClient"):
             patched.append((module, module.client))
             module.client = _SpyClient(path.stem, ai_calls)
 
@@ -1645,6 +1645,89 @@ def test_follow_up_questions() -> bool:
         problems.append("instructions list questions past the limit")
     ok = not problems
     print(f"follow_up_questions: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
+def test_own_key() -> bool:
+    """A visitor's own key is used for its request, never stored, redacted from errors and logs."""
+    import asyncio
+    import logging
+    import byok
+    import traces
+    import usage_limits
+
+    problems: list[str] = []
+    secret = "sk-proj-TESTsecretKEY1234567890"
+    seen: dict = {}
+
+    async def app(scope, receive, send):
+        seen["inside"] = byok.api_key()
+        seen["own"] = byok.has_own_key()
+
+    async def call(headers):
+        await byok.OwnKeyMiddleware(app)({"type": "http", "headers": headers}, None, None)
+
+    asyncio.run(call([(b"x-openai-key", secret.encode())]))
+    if seen.get("inside") != secret or not seen.get("own"):
+        problems.append("the request's own key is not used")
+    if byok.has_own_key() or byok.api_key() == secret:
+        problems.append("the key outlived its request")
+    asyncio.run(call([]))
+    if seen.get("inside") != os.environ.get("OPENAI_API_KEY") or seen.get("own"):
+        problems.append("a request without a key does not use the server's key")
+
+    # Redaction: errors, logs, traces.
+    token = byok._KEY.set(secret)
+    try:
+        if secret in byok.redact(f"boom {secret} and sk-abcdefgh12345678"):
+            problems.append("redact leaves a key in text")
+        if "sk-abcdefgh" in byok.redact("sk-abcdefgh12345678"):
+            problems.append("redact misses a key-shaped value")
+        if usage_limits.spend(None, None, "chat") is not True:
+            problems.append("a request with its own key was counted against the daily limit")
+
+        records: list[str] = []
+
+        class Grab(logging.Handler):
+            def emit(self, record):
+                records.append(self.format(record))
+
+        log = logging.getLogger("own_key_eval")
+        grab = Grab()
+        grab.addFilter(byok.RedactFilter())
+        log.addHandler(grab)
+        log.setLevel(logging.ERROR)
+        try:
+            raise RuntimeError(f"upstream said bad key {secret}")
+        except RuntimeError:
+            log.exception("call failed for %s", secret)
+        log.removeHandler(grab)
+        if not records or any(secret in r for r in records):
+            problems.append(f"a key reached the log: {records}")
+
+        class Cur:
+            def execute(self, sql, params):
+                seen["params"] = params
+
+            def fetchone(self):
+                return (1,)
+
+        traces.log_trace(Cur(), "s1", "chat", f"my key {secret}", {"error": f"bad {secret}"})
+        if secret in repr(seen.get("params")):
+            problems.append("a key was written into a trace")
+    finally:
+        byok._KEY.reset(token)
+
+    # No module may keep the key or build a client from the server key alone.
+    for path in (ROOT / "api").glob("*.py"):
+        text = path.read_text()
+        if path.name != "byok.py" and "OpenAI(api_key=os.getenv" in text:
+            problems.append(f"{path.name} builds a client that ignores the visitor's key")
+    if "INSERT" in (ROOT / "api" / "byok.py").read_text() or "execute(" in (ROOT / "api" / "byok.py").read_text():
+        problems.append("byok writes to the database")
+
+    ok = not problems
+    print(f"own_key: {'PASS' if ok else 'FAIL'} (problems={problems})")
     return ok
 
 
@@ -4229,6 +4312,7 @@ def main() -> int:
         test_hand_edit_clears_warning,
         test_single_save_door,
         test_daily_limits,
+        test_own_key,
         test_example_record_is_current,
         test_env_example_lists_settings,
         test_timing_log,

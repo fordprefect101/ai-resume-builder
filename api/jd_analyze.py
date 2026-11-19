@@ -6,7 +6,6 @@ import json
 import os
 import uuid
 
-from openai import OpenAI
 from dotenv import load_dotenv
 
 from claim_verify import verify_claim
@@ -16,12 +15,12 @@ from retrieval import retrieve_evidence
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from byok import api_key, client
 MODEL = os.getenv("OPENAI_CHAT_MODEL", os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini"))
 
 
 def extract_requirements(jd_text: str) -> list[dict]:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     response = client.chat.completions.create(
@@ -95,7 +94,7 @@ def generate_grounded_bullet(payload: dict, fact_ids: list[str], jd_context: str
     if not fact_contents:
         return {"bullet": "", "status": "unsupported", "supportedBy": []}
 
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         bullet = fact_contents[0]
         supported = [f.get("id") for f in facts if f.get("id")][:4]
         return {"bullet": bullet, "status": "supported", "supportedBy": supported}

@@ -1,6 +1,5 @@
 import json
 import os
-from openai import OpenAI
 from dotenv import load_dotenv
 
 from chat_tools import execute_tool, tools_for_payload
@@ -10,7 +9,7 @@ from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from byok import api_key, client
 MODEL = os.getenv("OPENAI_CHAT_MODEL", os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini"))
 
 SYSTEM_PROMPT = """You are a resume editing assistant.
@@ -59,7 +58,7 @@ def _chat_tools(payload: dict) -> list[dict]:
 
 
 def run_chat(payload: dict, message: str) -> dict:
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     intake_mode = is_intake_in_progress(payload)

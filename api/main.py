@@ -16,6 +16,7 @@ from pydantic import BaseModel
 load_dotenv()
 
 import assistant_result
+from byok import OwnKeyMiddleware, install_log_redaction, redact
 from auth import ensure_auth_schema, get_current_user, load_snapshot, user_resume_session
 from auth_routes import router as auth_router
 from chat import run_chat
@@ -93,6 +94,16 @@ app.add_middleware(
 )
 # Added last so it wraps everything, CORS included: the time is the whole request.
 app.add_middleware(TimingMiddleware)
+# Innermost of the pair: sets the visitor's own key (if any) for the request and nothing else.
+app.add_middleware(OwnKeyMiddleware)
+install_log_redaction()
+
+
+@app.exception_handler(HTTPException)
+async def http_error(_request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": redact(exc.detail)}, headers=exc.headers
+    )
 
 
 @app.exception_handler(RequestValidationError)

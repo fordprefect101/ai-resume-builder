@@ -5,6 +5,7 @@ import urllib.request
 
 from dotenv import load_dotenv
 
+from byok import api_key, redact
 from chat_tools import voice_tools_for_payload
 from context_selector import resume_context_summary
 from story_chunks import open_follow_ups
@@ -12,7 +13,6 @@ from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini")
 
 
@@ -41,7 +41,8 @@ def followup_instructions(payload: dict) -> str:
 
 
 def create_realtime_client_secret(payload: dict) -> dict:
-    if not OPENAI_API_KEY:
+    key = api_key()
+    if not key:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     intake_mode = is_intake_in_progress(payload)
@@ -118,7 +119,7 @@ def create_realtime_client_secret(payload: dict) -> dict:
         "https://api.openai.com/v1/realtime/client_secrets",
         data=json.dumps(body).encode(),
         headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         },
         method="POST",
@@ -130,5 +131,5 @@ def create_realtime_client_secret(payload: dict) -> dict:
     except urllib.error.HTTPError as err:
         detail = err.read().decode()
         raise RuntimeError(
-            f"openai_client_secret_failed: {err.code} {detail}"
+            redact(f"openai_client_secret_failed: {err.code} {detail}")
         ) from err

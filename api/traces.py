@@ -6,6 +6,8 @@ import json
 
 import psycopg
 
+from byok import redact
+
 
 def log_trace(
     cur,
@@ -20,7 +22,7 @@ def log_trace(
         VALUES (%s, %s, %s, %s::jsonb)
         RETURNING id
         """,
-        (session_id, request_type, input_text, json.dumps(trace)),
+        (session_id, request_type, redact(input_text), redact(json.dumps(trace))),
     )
     row = cur.fetchone()
     return row[0] if row else 0

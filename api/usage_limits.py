@@ -14,6 +14,8 @@ from datetime import date, datetime, timedelta, timezone
 import psycopg
 from fastapi import HTTPException, Request
 
+from byok import has_own_key
+
 # kind -> (setting name, default per day). Names are spelled out so .env.example can be checked.
 LIMITS: dict[str, tuple[str, int]] = {
     "chat": ("DAILY_LIMIT_CHAT", 30),
@@ -92,7 +94,11 @@ def charge_cursor(cur, visitor: str, kind: str, amount: int = 1, now: datetime |
 
 
 def spend(request: Request, user: dict | None, kind: str, session_id: str | None = None) -> bool:
-    """Count one use. True when allowed; False when the visitor is over today's limit."""
+    """Count one use. True when allowed; False when the visitor is over today's limit.
+
+    A request that carries the person's own key costs us nothing, so it is not counted."""
+    if has_own_key():
+        return True
     visitor = visitor_key(request, user, session_id)
     with psycopg.connect(os.getenv("DATABASE_URL") or "") as conn:
         with conn.cursor() as cur:

@@ -62,7 +62,9 @@ class OpenAIAdapter:
     def complete(self, model: str, messages: list[dict], temperature: float | None):
         from openai import OpenAI
 
-        key = os.getenv("OPENAI_API_KEY")
+        from byok import api_key
+
+        key = api_key()
         if not key:
             raise RuntimeError("OPENAI_API_KEY is not set")
         kwargs: dict = {"response_format": {"type": "json_object"}}

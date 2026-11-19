@@ -3,14 +3,13 @@
 import json
 import os
 
-from openai import OpenAI
 from dotenv import load_dotenv
 
 from section_registry import get_section_profile
 
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from byok import api_key, client
 MODEL = os.getenv("OPENAI_ENRICH_MODEL", "gpt-4.1-mini")
 
 
@@ -49,7 +48,7 @@ def enrich_item(section: str, item: dict) -> dict:
     if not profile.get("enrich"):
         return {}
 
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         return {"categories": [], "skills": []}
 
     kind = profile.get("kind") or section
@@ -99,7 +98,7 @@ def polish_item_bullets(section: str, item: dict) -> dict:
         return {}
 
     raw = list(item.get("bullets") or [])
-    if not os.getenv("OPENAI_API_KEY"):
+    if not api_key():
         return {"bullets": raw}
 
     kind = profile.get("kind") or section

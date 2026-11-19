@@ -153,7 +153,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Done when: offline evals cover counting, the limit, the reset, and that every paid endpoint goes
   through the counter (like the existing `single_save_door` check).
 
-### [ ] T9. Bring your own key
+### [x] T9. Bring your own key
 - After the limit, the person can paste their own OpenAI key. Keep it only in the browser
   (`sessionStorage`), send it with each AI request in a header, use it for that request only.
 - The server never stores it, never logs it, never puts it in traces or error messages. Redact it
@@ -193,6 +193,7 @@ with Parth, not by autopilot.
 - T5: with a real key, make the writing team simplify a line: the entry shows a warning under it. Edit that line by chat ("change that point to …"): the warning goes. Saving and the preview/download are never blocked, and the resume page shows no warning.
 - T6: print preview (Chrome and Safari) of the resume: only the resume page shows, on A4 and US Letter, text is selectable in the saved PDF, entries do not split across pages, no warnings/story/debug panels. As a guest, "Download PDF" asks to log in first.
 - T7: open the left panel: it reads "Change your resume in plain words"; "Tailor to a job" makes a version; "Why is this line here?" shows only fact text (no raw story); "History" shows readable times and restore works. "Developer tools (for debugging)" is closed by default and holds the JSON and event log.
+- T9: paste a key after hitting the limit (or any time via the box): the call works, the chip "Using your own key" shows, a reload of the tab keeps it, closing the tab forgets it; check the server database/traces/logs never contain it; "Remove my key" goes back to the free limit; a voice call with their key works.
 
 ## Log
 
@@ -218,3 +219,4 @@ with Parth, not by autopilot.
 - 2026-11-19 12:58 UTC — STARTED T8 (autopilot)
 - 2026-11-19 13:01 UTC — T8 done (autopilot). New api/usage_limits.py + api/db/usage.sql (`usage_counts`, per visitor/kind/UTC day, created with the v2 schema). `charge` refuses with a 429 that says when it resets and offers own key; counted: chat, mutate, Realtime token (per call), rewrite, analyze-jd, PDF import, enrichment (over the limit the entry is added without tidy-up). Limits `DAILY_LIMIT_*` in api/.env.example. New eval `daily_limits`. Evals 47/47, lint clean, build passes. Website does not yet offer the own-key box (T9).
 - 2026-11-19 13:58 UTC — STARTED T9 (autopilot)
+- 2026-11-19 14:10 UTC — T9 done (autopilot). New api/byok.py: the key comes in the `X-OpenAI-Key` header (pure ASGI middleware, held in a context variable for that request only), every OpenAI call (chat, rewrite, analyst/writer, jd, PDF import, enrichment, Realtime token) uses `api_key()`; requests with their key are not counted by the daily limit; keys are redacted from HTTP error bodies, log lines/exceptions and traces. Website: `api/ownKey.ts` (sessionStorage, header added to API calls only) and the `OwnKeyBox` that opens on the limit's 429. New eval `own_key`; live_path_guard now also recognises the per-request client. Evals 48/48, lint clean, build passes. Manual check added.
