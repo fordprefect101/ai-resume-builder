@@ -86,3 +86,101 @@ def with_story(payload: dict, section: str, item_id: str, turns, source: str = "
     sections[section] = bag
     inventory["sections"] = sections
     return {**payload, "inventory": inventory}
+
+
+MAX_FOLLOW_UPS = 2  # questions asked per entry, ever
+SKIP_WORDS = ("skip", "i don't know", "i dont know", "don't know", "dont know", "no idea", "pass")
+
+
+def follow_ups_left(level: dict) -> int:
+    """How many more questions may still be asked about this entry (or project)."""
+    asked = (level.get("writing") or {}).get("followUpsAsked")
+    return max(0, MAX_FOLLOW_UPS - (asked if isinstance(asked, int) else 0))
+
+
+def open_questions(level: dict) -> list[dict]:
+    """The writing team's questions still waiting for an answer, within the 2-question limit."""
+    questions = [
+        q for q in (level.get("writing") or {}).get("questions") or []
+        if isinstance(q, dict) and q.get("id") and q.get("text")
+    ]
+    return questions[: follow_ups_left(level)]
+
+
+def is_skip(text: str) -> bool:
+    """True for "skip" / "I don't know" style answers, which add nothing to the story."""
+    plain = " ".join(str(text or "").lower().strip(" .!?").split())
+    return not plain or plain in SKIP_WORDS
+
+
+def answer_follow_up(level: dict, question_id: str, turns, source: str = "voice",
+                     skipped: bool = False) -> dict:
+    """The entry with one question answered (or skipped). The answer joins the story as
+    `followup` chunks; a skip adds nothing. Either way the question is used up: it is
+    removed and counts toward the 2-question limit. Raises KeyError for an unknown or
+    already-used question, ValueError when the limit is reached."""
+    if source not in ("voice", "typed"):
+        raise ValueError(f"unknown answer source: {source}")
+    if question_id not in {q["id"] for q in open_questions(level)}:
+        if follow_ups_left(level) == 0:
+            raise ValueError("No more follow-up questions are allowed for this entry.")
+        raise KeyError(f"question not found: {question_id}")
+    texts = _clean_turns(turns)
+    if skipped or not texts or is_skip(" ".join(texts)):
+        texts = []
+    if texts:
+        level = add_story_chunks(level, texts, "followup")
+    writing = dict(level.get("writing") or {})
+    writing["questions"] = [q for q in writing.get("questions") or [] if q.get("id") != question_id]
+    writing["followUpsAsked"] = (writing.get("followUpsAsked") or 0) + 1
+    return {**level, "writing": writing}
+
+
+def with_follow_up_answer(payload: dict, section: str, item_id: str, question_id: str, turns,
+                          source: str = "voice", skipped: bool = False,
+                          project_id: str | None = None) -> dict:
+    """The payload with one follow-up question answered on one entry (or project)."""
+    inventory = dict(payload.get("inventory") or {})
+    sections = dict(inventory.get("sections") or {})
+    bag = dict(sections.get(section) or {})
+    if not section_has_points(section) or not bag:
+        raise KeyError(f"section not found: {section}")
+    items, found = [], False
+    for item in bag.get("items") or []:
+        if isinstance(item, dict) and item.get("id") == item_id:
+            if project_id:
+                projects = []
+                for p in item.get("projects") or []:
+                    if isinstance(p, dict) and p.get("id") == project_id:
+                        p, found = answer_follow_up(p, question_id, turns, source, skipped), True
+                    projects.append(p)
+                item = {**item, "projects": projects}
+            else:
+                item, found = answer_follow_up(item, question_id, turns, source, skipped), True
+        items.append(item)
+    if not found:
+        raise KeyError(f"entry not found: {section}/{item_id}")
+    sections[section] = {**bag, "items": items}
+    inventory["sections"] = sections
+    return {**payload, "inventory": inventory}
+
+
+def open_follow_ups(payload: dict) -> list[dict]:
+    """Every open question in the resume, with where it belongs, for the voice assistant."""
+    out = []
+    sections = (payload.get("inventory") or {}).get("sections") or {}
+    for section in ("experience", "projects"):
+        for item in (sections.get(section) or {}).get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("company") or item.get("title") or item.get("name") or ""
+            levels = [(item, None, label)] + [
+                (p, p.get("id"), f"{label} / {p.get('name', '')}")
+                for p in item.get("projects") or [] if isinstance(p, dict)
+            ]
+            for level, project_id, name in levels:
+                for q in open_questions(level):
+                    out.append({"section": section, "itemId": item.get("id"),
+                                "projectId": project_id, "entry": name,
+                                "questionId": q["id"], "question": q["text"]})
+    return out

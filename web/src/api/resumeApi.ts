@@ -353,3 +353,36 @@ export async function rewriteEntry(
   }
   return res.json()
 }
+
+/**
+ * Store the person's typed answer to one of the writing team's questions (or a skip).
+ * The server keeps the answer as part of the entry's story and counts it toward the
+ * 2-question limit; the caller then lets the writing team rewrite the entry.
+ */
+export async function answerFollowup(
+  sessionId: string,
+  target: RewriteTarget,
+  questionId: string,
+  answer: string,
+  skipped = false
+): Promise<{ payload: unknown; version: number }> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/answer_followup`,
+    {
+      ...creds,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section: target.section,
+        itemId: target.itemId,
+        projectId: target.projectId ?? null,
+        questionId,
+        storyTurns: skipped ? [] : [answer],
+        storySource: 'typed',
+        skipped,
+      }),
+    }
+  )
+  if (!res.ok) throw new Error(await apiErrorMessage(res, `Could not save the answer: ${res.status}`))
+  return res.json()
+}

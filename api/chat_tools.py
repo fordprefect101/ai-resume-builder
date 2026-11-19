@@ -291,6 +291,30 @@ END_VOICE_SESSION_TOOL = {
     },
 }
 
+# Voice only: the typed screen answers these questions in a box under the entry.
+ANSWER_FOLLOWUP_TOOL = {
+    "type": "function",
+    "name": "answer_followup",
+    "description": (
+        "Record that the person answered (or skipped) one of the open follow-up questions "
+        "from the context. Ask the question aloud first, wait for their answer, then call "
+        "this with the question's ids. The app saves the person's own words; do not "
+        "summarise them. Set skipped to true when they say they don't know or want to skip."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "section": {"type": "string"},
+            "itemId": {"type": "string"},
+            "projectId": {"type": "string", "description": "Only when the question names a project."},
+            "questionId": {"type": "string"},
+            "skipped": {"type": "boolean"},
+        },
+        "required": ["section", "itemId", "questionId"],
+        "additionalProperties": False,
+    },
+}
+
 TOOL_DEFINITIONS.extend([ADD_PROJECT_TOOL, *EDIT_PROJECT_TOOLS])
 
 INTAKE_TOOL_DEFINITIONS = [
@@ -310,8 +334,8 @@ def tools_for_payload(payload: dict) -> list[dict]:
 
 
 def voice_tools_for_payload(payload: dict) -> list[dict]:
-    """The tools of the voice call: the chat tools plus the one that ends the call."""
-    return [*tools_for_payload(payload), END_VOICE_SESSION_TOOL]
+    """The tools of the voice call: the chat tools plus answering follow-ups and ending the call."""
+    return [*tools_for_payload(payload), ANSWER_FOLLOWUP_TOOL, END_VOICE_SESSION_TOOL]
 
 
 def execute_tool(

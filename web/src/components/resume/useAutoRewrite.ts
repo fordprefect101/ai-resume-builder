@@ -163,5 +163,12 @@ export function useAutoRewrite(
     }
   }, [payload, sessionId, ready, voiceActive, run])
 
-  return { states, run, dismiss: (key: string) => setState(key, null) }
+  return {
+    states,
+    run,
+    dismiss: (key: string) => setState(key, null),
+    /** Hand a saved payload (from another request) to the app. */
+    sessionId,
+    applyPayload: (payload: unknown, version: number) => onPayloadRef.current(payload, version),
+  }
 }

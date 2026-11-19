@@ -26,7 +26,7 @@ from facts import sync_facts_from_item
 from jd_analyze import analyze_job_description, create_job_variant
 from mutation_pipeline import run_mutation
 from payload_normalize import normalize_payload
-from story_chunks import with_story
+from story_chunks import with_follow_up_answer, with_story
 from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
 from retrieval import retrieve_evidence
@@ -146,6 +146,16 @@ class AddProjectBody(BaseModel):
     bullets: list[str] = []
     storyTurns: list[str] = []  # what the person said about this project, their own words
     storySource: Literal["voice", "typed"] = "voice"
+
+
+class AnswerFollowupBody(BaseModel):
+    section: str
+    itemId: str
+    projectId: str | None = None
+    questionId: str
+    storyTurns: list[str] = []  # the person's own answer
+    storySource: Literal["voice", "typed"] = "voice"
+    skipped: bool = False  # "I don't know" / "skip": the question is used up, nothing is added
 
 
 class RenameProjectBody(BaseModel):
@@ -1153,6 +1163,47 @@ def tool_add_project(session_id: str, body: AddProjectBody, request: Request):
             item_id=body.itemId,
             project_id=project_id,
         ),
+    }
+
+
+@app.post("/resume/{session_id}/tools/answer_followup")
+def tool_answer_followup(session_id: str, body: AnswerFollowupBody, request: Request):
+    """Store the person's answer to a writing-team question (or a skip) on the entry."""
+    with psycopg.connect(DATABASE_URL) as conn:
+        with conn.cursor() as cur:
+            row = load_snapshot(cur, session_id, get_current_user(request))
+            previous = normalize_payload(row[1])
+            try:
+                new_payload = with_follow_up_answer(
+                    previous, body.section, body.itemId, body.questionId, body.storyTurns,
+                    body.storySource, body.skipped, project_id=body.projectId,
+                )
+            except KeyError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+            saved = _save_payload(
+                cur,
+                session_id,
+                previous,
+                new_payload,
+                operations=[{
+                    "type": "TOOL", "tool": "answer_followup",
+                    "section": body.section, "itemId": body.itemId,
+                    "projectId": body.projectId,
+                }],
+                summary="Answered a follow-up question",
+            )
+        conn.commit()
+
+    return {
+        "sessionId": saved[0],
+        "payload": saved[1],
+        "version": saved[2],
+        "appliedTool": "answer_followup",
+        "section": body.section,
+        "itemId": body.itemId,
+        "projectId": body.projectId,
     }
 
 

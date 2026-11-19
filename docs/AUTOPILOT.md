@@ -109,7 +109,7 @@ The backend `POST /resume/{id}/rewrite` exists and is tested; nothing in the web
 - Never run it from inside the live voice path (the endpoint is slow).
 - Done when: lint/build pass; offline evals still pass; manual check added.
 
-### [ ] T4. Follow-up questions
+### [x] T4. Follow-up questions
 The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Store them on the entry (`writing.questions`, `followUpsAsked` already exist in the record shape).
 - When a voice call is open or next opens for that entry, give the assistant the open questions
@@ -189,6 +189,7 @@ with Parth, not by autopilot.
   audio (not mid-sentence), and the screen shows "All done". Also say "that's all" in edit mode. The
   stop button must still work. Check it never hangs up while a tool is running.
 - T3: with a real key, finish describing a job by voice. When the call ends, the entry shows "Writing your points…" and then new checked points appear, without a page reload. While the call is open nothing is rewritten. "Rewrite points" re-runs it; after editing a point by hand it asks "Replace my points / Keep mine". Stop the API mid-run: the old points stay and "Try again" shows.
+- T4: with a real key, finish a job by voice so the writing team returns questions. Open a new call: the assistant asks them one at a time (max 2 per entry), accepts "I don't know", and your spoken answer lands in the story (`source: "followup"`), then the points rewrite after the call. In text mode the questions show under the entry with Answer / Skip.
 
 ## Log
 
@@ -204,3 +205,4 @@ with Parth, not by autopilot.
 - 2026-11-19 07:58 UTC — STARTED T3 (autopilot)
 - 2026-11-19 08:01 UTC — T3 done (autopilot). `rewriteEntry()` in web/src/api/resumeApi.ts; new hook web/src/components/resume/useAutoRewrite.ts runs the writing team in the background when an entry's story changes (waits while a voice call is open, never from the voice path); plain-words handling of skipped, 409 (ask before replacing edited points; changed meanwhile: run once more), 429, 502; "Rewrite points" button (force) on each experience/project entry and project inside a job. No new offline eval (browser-only change; backend already covered). Evals 44/44, lint clean, build passes. Manual check added.
 - 2026-11-19 08:58 UTC — STARTED T4 (autopilot)
+- 2026-11-19 09:01 UTC — T4 done (autopilot). Questions already stored by the writing store now respect the 2-per-entry cap; new `answer_follow_up` / `open_follow_ups` in api/story_chunks.py, endpoint `tools/answer_followup`, voice-only tool `answer_followup` (the person's own words are stored, skip adds nothing but counts), open questions and rules added to voice instructions (`followup_instructions`), Answer/Skip boxes under each entry in the editor; the answer changes the story so the auto-rewrite (T3) runs. New eval `follow_up_questions`. Evals 45/45, lint clean, build passes. Manual check added.

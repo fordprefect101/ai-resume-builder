@@ -3,7 +3,7 @@ import { setProjectLinkPrivate } from '../../api/resumeApi'
 import { BasicsEditor } from './BasicsEditor'
 import { useContactStatus } from './useContactStatus'
 import { targetKey, type RewriteControls } from './useAutoRewrite'
-import type { RewriteTarget } from '../../api/resumeApi'
+import { answerFollowup, type RewriteTarget } from '../../api/resumeApi'
 import {
   isBasicsVerified,
   type BasicsInput,
@@ -135,6 +135,74 @@ function RewriteLine({
   )
 }
 
+const MAX_FOLLOW_UPS = 2
+
+/** The writing team's open questions about one entry, each with a box to answer. */
+function FollowUps({
+  level,
+  target,
+  controls,
+  disabled,
+}: {
+  level: { writing?: { questions?: unknown[]; followUpsAsked?: number } }
+  target: RewriteTarget
+  controls: RewriteControls
+  disabled: boolean
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const left = Math.max(0, MAX_FOLLOW_UPS - (level.writing?.followUpsAsked ?? 0))
+  const questions = ((level.writing?.questions ?? []) as { id?: string; text?: string }[])
+    .filter((q) => q.id && q.text)
+    .slice(0, left)
+  if (questions.length === 0) return null
+
+  async function send(id: string, skipped: boolean) {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await answerFollowup(
+        controls.sessionId, target, id, answers[id] ?? '', skipped
+      )
+      controls.applyPayload(res.payload, res.version)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save your answer.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="followups">
+      {questions.map((q) => (
+        <div key={q.id} className="followup">
+          <label>
+            <span>{q.text}</span>
+            <textarea
+              rows={2}
+              value={answers[q.id!] ?? ''}
+              disabled={disabled || busy}
+              onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id!]: e.target.value }))}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={disabled || busy || !(answers[q.id!] ?? '').trim()}
+            onClick={() => void send(q.id!, false)}
+          >
+            Answer
+          </button>
+          <button type="button" disabled={disabled || busy} onClick={() => void send(q.id!, true)}>
+            Skip
+          </button>
+        </div>
+      ))}
+      {error && <span className="contact-error">{error}</span>}
+    </div>
+  )
+}
+
 /**
  * Read-only list of a job's projects, active ones first and archived ones dimmed.
  * Projects are added, renamed, archived and reordered by voice for now.
@@ -176,6 +244,14 @@ function ProjectList({
             </small>
             {!isArchived && (
               <RewriteLine
+                target={{ section, itemId: item.id, projectId: project.id }}
+                controls={rewrite}
+                disabled={disabled}
+              />
+            )}
+            {!isArchived && (
+              <FollowUps
+                level={project}
                 target={{ section, itemId: item.id, projectId: project.id }}
                 controls={rewrite}
                 disabled={disabled}
@@ -379,6 +455,14 @@ export function ResumeEditor({
                         </div>
                         {(sectionKey === 'experience' || sectionKey === 'projects') && (
                           <RewriteLine
+                            target={{ section: sectionKey, itemId: item.id }}
+                            controls={rewrite}
+                            disabled={contentLocked}
+                          />
+                        )}
+                        {(sectionKey === 'experience' || sectionKey === 'projects') && (
+                          <FollowUps
+                            level={item}
                             target={{ section: sectionKey, itemId: item.id }}
                             controls={rewrite}
                             disabled={contentLocked}

@@ -71,6 +71,7 @@ the stored record. It also confirms the server can start on an empty database, a
 | `example_record_is_current` | `api/resume-schema.example.json` is a valid, normalized v5 record with no duplicate keys and a project inside a job whose points are recorded as its own |
 | `env_example_lists_settings` | `api/.env.example` names every setting the API code reads |
 | `story_keeps_persons_words` | The person's turns are stored as story chunks on an entry and on a project (voice and typed), the cap keeps the newest words, assistant text is never stored, and old resumes still load |
+| `follow_up_questions` | The writing team's questions are stored on the entry, capped at 2 per entry, answers (or a skip) use them up and join the story as `followup` chunks, the voice call is told the open questions, and text chat is not offered the voice tool |
 | `timing_log` | The timing wrapper is installed, records duration, size and tidy-up time, and never writes a session id |
 
 ## Planned (not built yet)

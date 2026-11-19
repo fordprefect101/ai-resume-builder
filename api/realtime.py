@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from chat_tools import voice_tools_for_payload
 from context_selector import resume_context_summary
+from story_chunks import open_follow_ups
 from resume_ops import intake_context, is_intake_in_progress
 
 load_dotenv()
@@ -21,6 +22,22 @@ END_CALL_RULE = (
     "nothing more, say a short goodbye and then call end_voice_session. Never call "
     "end_voice_session in the same turn as another tool; wait for that tool's result first."
 )
+
+FOLLOWUP_RULE = (
+    "FOLLOW-UP QUESTIONS: OPEN FOLLOW-UPS lists questions the writing team needs answered "
+    "to write stronger points. Ask them one at a time, in plain words, at most 2 per entry, "
+    "and only once the current topic is finished. After the person answers, call "
+    "answer_followup with that question's ids; if they say they don't know or want to skip, "
+    "call it with skipped true and move on without pushing. Never answer for them."
+)
+
+
+def followup_instructions(payload: dict) -> str:
+    """Instruction text naming the open questions; empty when there are none."""
+    open_ones = open_follow_ups(payload)
+    if not open_ones:
+        return ""
+    return f"OPEN FOLLOW-UPS: {json.dumps(open_ones)}. {FOLLOWUP_RULE} "
 
 
 def create_realtime_client_secret(payload: dict) -> dict:
@@ -52,6 +69,7 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "Call complete_intake only after skills and all four sections were "
             "addressed; pass every confirmed skipped section. Do not invent facts. "
             "Tool outputs contain refreshed persisted intake context; treat them as truth. "
+            + followup_instructions(payload)
             + END_CALL_RULE
         )
     else:
@@ -74,6 +92,7 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "projectId that search_resume_context returns. reorder_projects needs every "
             "active projectId of that job. Archiving keeps a project's points. "
             "Prefer soft exclude over deletion. "
+            + followup_instructions(payload)
             + END_CALL_RULE
         )
 

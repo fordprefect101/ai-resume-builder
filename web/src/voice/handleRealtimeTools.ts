@@ -142,6 +142,29 @@ export async function runResumeTool(
     return res.json()
   }
 
+  if (name === 'answer_followup') {
+    // The person's own spoken words are the answer, not the assistant's summary of them.
+    const res = await fetch(
+      `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/answer_followup`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          section: args.section,
+          itemId: args.itemId,
+          projectId: args.projectId ?? null,
+          questionId: args.questionId,
+          skipped: Boolean(args.skipped),
+          storyTurns: args.skipped ? [] : takePersonTurns(),
+          storySource: 'voice',
+        }),
+      }
+    )
+    if (!res.ok) throw new Error(await apiErrorMessage(res, `answer_followup failed: ${res.status}`))
+    return res.json()
+  }
+
   if (name === 'reorder_sections') {
     const res = await fetch(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/reorder_sections`,

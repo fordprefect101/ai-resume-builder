@@ -37,7 +37,7 @@ export type StoryChunk = {
 
 export type WritingState = {
   status: string
-  questions: unknown[]
+  questions: { id: string; text: string }[] | unknown[]
   followUpsAsked: number
 }
 

@@ -1210,3 +1210,9 @@
   padding: 2px 8px;
   font-size: 12px;
 }
+
+.followups { display: grid; gap: 8px; margin-top: 6px; }
+.followup { display: grid; gap: 4px; }
+.followup label { display: grid; gap: 4px; font-size: 0.9rem; }
+.followup textarea { width: 100%; font: inherit; }
+.followup button { justify-self: start; }

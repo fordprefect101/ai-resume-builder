@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from claims import section_has_points, set_item_points
 from facts import replace_ai_facts
+from story_chunks import follow_ups_left
 from writing import rules
 
 
@@ -141,7 +142,7 @@ def apply_result(
             "status": "ready" if all_supported else "needs_review",
             "questions": [
                 {"id": "q_" + hashlib.sha1(q.encode()).hexdigest()[:8], "text": q}
-                for q in result.missing
+                for q in result.missing[: follow_ups_left(target)]
             ],
             "storyFingerprint": fingerprint,
             "lastRunAt": stamp,

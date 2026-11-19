@@ -1553,6 +1553,81 @@ def test_story_keeps_persons_words() -> bool:
     return ok
 
 
+def test_follow_up_questions() -> bool:
+    """Questions are stored, limited to 2 per entry, and answers join the story."""
+    import chat_tools
+    import realtime
+    import story_chunks
+    from types import SimpleNamespace
+    from writing import store as writing_store
+
+    problems = []
+    base = load_fixture("sample_career.json")
+    base = story_chunks.with_story(base, "experience", "exp_chaishots", ["I built the matcher"], "voice")
+    result = SimpleNamespace(
+        ok=True, missing=["How many users?", "What was the latency?", "Who was on the team?"],
+        facts=[], points=[{"content": "Built the matcher", "supportedBy": [], "status": "supported", "issues": []}],
+    )
+    try:
+        stored = writing_store.apply_result(base, "experience", "exp_chaishots", result)
+    except Exception as err:
+        print(f"follow_up_questions: FAIL (apply_result raised {type(err).__name__}: {err})")
+        return False
+
+    def job(p):
+        return next(i for i in p["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+
+    questions = job(stored)["writing"]["questions"]
+    if len(questions) != 2 or not all(q["id"] and q["text"] for q in questions):
+        problems.append(f"questions stored={questions}")
+    if [q["question"] for q in story_chunks.open_follow_ups(stored)] != [q["text"] for q in questions]:
+        problems.append("open_follow_ups does not list the stored questions")
+
+    # An answer joins the story as a followup chunk and uses up one of the two questions.
+    one = story_chunks.with_follow_up_answer(stored, "experience", "exp_chaishots", questions[0]["id"],
+                                             ["About two thousand users"], "voice")
+    w = job(one)["writing"]
+    if [c["source"] for c in job(one)["story"]] != ["voice", "followup"]:
+        problems.append(f"answer sources={[c['source'] for c in job(one)['story']]}")
+    if w["followUpsAsked"] != 1 or [q["id"] for q in w["questions"]] != [questions[1]["id"]]:
+        problems.append(f"after one answer: {w}")
+
+    # "I don't know" adds no words but still counts; the limit then closes the entry.
+    two = story_chunks.with_follow_up_answer(one, "experience", "exp_chaishots", questions[1]["id"],
+                                             ["I don't know"], "typed")
+    if len(job(two)["story"]) != 2 or job(two)["writing"]["followUpsAsked"] != 2:
+        problems.append("a skip should add no words and still count")
+    if story_chunks.open_follow_ups(two):
+        problems.append("questions still open after the limit")
+    try:
+        story_chunks.with_follow_up_answer(two, "experience", "exp_chaishots", questions[0]["id"], ["x"])
+        problems.append("a third question was accepted")
+    except ValueError:
+        pass
+    again = writing_store.apply_result(two, "experience", "exp_chaishots", result)
+    if job(again)["writing"]["questions"]:
+        problems.append("a rewrite re-opened questions past the limit")
+    try:
+        story_chunks.with_follow_up_answer(stored, "experience", "exp_chaishots", "q_nope", ["x"])
+        problems.append("an unknown question id was accepted")
+    except KeyError:
+        pass
+
+    # The voice call is told the open questions and has the tool; text chat does not.
+    voice = {t["name"] for t in chat_tools.voice_tools_for_payload(stored)}
+    chat = {t["name"] for t in chat_tools.tools_for_payload(stored)}
+    if "answer_followup" not in voice or "answer_followup" in chat:
+        problems.append("answer_followup must be voice-only")
+    text = realtime.followup_instructions(stored)
+    if "How many users?" not in text or "at most 2" not in text or "skip" not in text:
+        problems.append("voice instructions miss the open questions or rules")
+    if realtime.followup_instructions(two):
+        problems.append("instructions list questions past the limit")
+    ok = not problems
+    print(f"follow_up_questions: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -4037,6 +4112,7 @@ def main() -> int:
         test_live_path_guard,
         test_voice_can_end_call,
         test_story_keeps_persons_words,
+        test_follow_up_questions,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,

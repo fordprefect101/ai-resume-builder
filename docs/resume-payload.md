@@ -106,9 +106,9 @@ Only the person's words are stored, never the assistant's. `add_item` and `add_p
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `status` | string | Only `idle` is written today |
-| `questions` | object[] | Open follow-up questions (`[]` today) |
-| `followUpsAsked` | number | Count toward the per-item follow-up cap |
+| `status` | string | `idle`, `ready` or `needs_review` |
+| `questions` | `{id, text}[]` | Open follow-up questions from the analyst, never more than 2 minus `followUpsAsked` |
+| `followUpsAsked` | number | Questions answered or skipped so far; the cap is 2 per entry (or project). Answers go to the story as `followup` chunks; a skip adds nothing but still counts. Endpoint: `POST /resume/{id}/tools/answer_followup`; voice tool `answer_followup` (voice only). Code: `api/story_chunks.py` |
 
 ### `sections.experience.items[]`
 
