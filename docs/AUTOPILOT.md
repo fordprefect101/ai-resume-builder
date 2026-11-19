@@ -215,3 +215,4 @@ with Parth, not by autopilot.
 - 2026-11-19 11:05 UTC — T6 done (autopilot). "Download PDF" button in the workspace toolbar (guests are asked to log in first, like Save) calls the browser print; print stylesheet in web/src/styles/app.css shows only `.resume-paper`, @page margins fit A4 and Letter, page breaks kept between entries. Preview never renders warnings/story. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
 - 2026-11-19 11:59 UTC — STARTED T7 (autopilot)
 - 2026-11-19 12:05 UTC — T7 done (autopilot). IntelligencePanel rewritten in plain words: "Tailor to a job", "Why is this line here?" (fact content only), "History" (readable times, go back); the technical messages renamed; JSON console and event log stay inside the closed "Developer tools (for debugging)" toggle. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
+- 2026-11-19 12:58 UTC — STARTED T8 (autopilot)
