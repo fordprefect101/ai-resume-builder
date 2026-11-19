@@ -1553,6 +1553,26 @@ def test_story_keeps_persons_words() -> bool:
     return ok
 
 
+def test_hand_edit_clears_warning() -> bool:
+    """A point the person edits by hand loses its warning; untouched points keep theirs."""
+    problems = []
+    base = load_fixture("sample_career.json")
+    item = base["inventory"]["sections"]["experience"]["items"][0]
+    iid = item["id"]
+    flagged = set_item_points(
+        base, "experience", iid, ["Built the matcher", "Cut load time"],
+        origin="ai", details=[{"status": "needs_review"}, {"status": "unchecked"}],
+    )
+    edited = update_item(flagged, "experience", iid, {"bullets": ["Built the matcher", "Cut load time by half"]})
+    got = {p["content"]: (p["status"], p["origin"]) for p in points_for_item(edited, "experience", iid)}
+    if got.get("Built the matcher") != ("needs_review", "ai"):
+        problems.append(f"untouched point changed: {got.get('Built the matcher')}")
+    if got.get("Cut load time by half") != ("user_edited", "user"):
+        problems.append(f"hand-edited point: {got.get('Cut load time by half')}")
+    print(f"hand_edit_clears_warning: {'PASS' if not problems else 'FAIL'} (problems={problems})")
+    return not problems
+
+
 def test_follow_up_questions() -> bool:
     """Questions are stored, limited to 2 per entry, and answers join the story."""
     import chat_tools
@@ -4113,6 +4133,7 @@ def main() -> int:
         test_voice_can_end_call,
         test_story_keeps_persons_words,
         test_follow_up_questions,
+        test_hand_edit_clears_warning,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,

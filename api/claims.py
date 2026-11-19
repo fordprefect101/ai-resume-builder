@@ -64,6 +64,9 @@ def new_point(
         raise ValueError(f"unknown point status: {status}")
     if origin not in POINT_ORIGINS:
         raise ValueError(f"unknown point origin: {origin}")
+    if origin == "user" and status == "unchecked":
+        # The person's own wording: nothing to double-check, so no warning.
+        status = "user_edited"
     return {
         "id": point_id(section, item_id, content, occurrence, project_id),
         "content": content,

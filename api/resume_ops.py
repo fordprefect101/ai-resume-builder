@@ -637,7 +637,9 @@ def update_item(
     inventory["sections"] = sections
     new_payload = {**payload, "inventory": inventory}
     if new_bullets is not None:
-        new_payload = set_item_points(new_payload, section, item_id, new_bullets)
+        new_payload = set_item_points(
+            new_payload, section, item_id, new_bullets, origin="user"
+        )
     return new_payload
 
 
