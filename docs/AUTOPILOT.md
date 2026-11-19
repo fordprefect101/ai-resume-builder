@@ -120,7 +120,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Done when: offline evals cover storing questions, the 2-question limit, and follow-up chunks
   joining the story; lint/build pass.
 
-### [ ] T5. Warning badge on points that need a look
+### [x] T5. Warning badge on points that need a look
 - In the editor, a point with status `needs_review` or `unchecked` shows a small warning with a
   one-line plain reason ("This line was simplified because the first version claimed more than
   you said" / "This line was not double-checked"). The person can edit or keep it.
@@ -190,6 +190,7 @@ with Parth, not by autopilot.
   stop button must still work. Check it never hangs up while a tool is running.
 - T3: with a real key, finish describing a job by voice. When the call ends, the entry shows "Writing your points…" and then new checked points appear, without a page reload. While the call is open nothing is rewritten. "Rewrite points" re-runs it; after editing a point by hand it asks "Replace my points / Keep mine". Stop the API mid-run: the old points stay and "Try again" shows.
 - T4: with a real key, finish a job by voice so the writing team returns questions. Open a new call: the assistant asks them one at a time (max 2 per entry), accepts "I don't know", and your spoken answer lands in the story (`source: "followup"`), then the points rewrite after the call. In text mode the questions show under the entry with Answer / Skip.
+- T5: with a real key, make the writing team simplify a line: the entry shows a warning under it. Edit that line by chat ("change that point to …"): the warning goes. Saving and the preview/download are never blocked, and the resume page shows no warning.
 
 ## Log
 
@@ -207,3 +208,4 @@ with Parth, not by autopilot.
 - 2026-11-19 08:58 UTC — STARTED T4 (autopilot)
 - 2026-11-19 09:01 UTC — T4 done (autopilot). Questions already stored by the writing store now respect the 2-per-entry cap; new `answer_follow_up` / `open_follow_ups` in api/story_chunks.py, endpoint `tools/answer_followup`, voice-only tool `answer_followup` (the person's own words are stored, skip adds nothing but counts), open questions and rules added to voice instructions (`followup_instructions`), Answer/Skip boxes under each entry in the editor; the answer changes the story so the auto-rewrite (T3) runs. New eval `follow_up_questions`. Evals 45/45, lint clean, build passes. Manual check added.
 - 2026-11-19 09:58 UTC — STARTED T5 (autopilot)
+- 2026-11-19 10:10 UTC — T5 done (autopilot). A point written by the person's own edit (`update_item` bullets) now gets origin `user` and status `user_edited` (`new_point` in api/claims.py), so its warning clears; unchanged points keep theirs. Editor shows a `PointWarnings` note under each entry/project for `needs_review` / `unchecked` points; the resume preview never shows it. New eval `hand_edit_clears_warning`. Evals 46/46, lint clean, build passes. Manual check added.

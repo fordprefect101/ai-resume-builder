@@ -7,6 +7,7 @@ import { answerFollowup, type RewriteTarget } from '../../api/resumeApi'
 import {
   isBasicsVerified,
   type BasicsInput,
+  type DerivedClaim,
   type ProjectLinkView,
   type ResumeItem,
   type ResumePayload,
@@ -135,6 +136,47 @@ function RewriteLine({
   )
 }
 
+const WARNING_TEXT: Record<string, string> = {
+  needs_review:
+    'This line was simplified because the first version claimed more than you said.',
+  unchecked: 'This line was not double-checked.',
+}
+
+/**
+ * A small note under an entry for each point that needs a look. Information only:
+ * it never blocks saving or downloading and is not printed on the resume.
+ */
+function PointWarnings({
+  claims,
+  target,
+}: {
+  claims: DerivedClaim[]
+  target: RewriteTarget
+}) {
+  const flagged = claims
+    .filter(
+      (claim) =>
+        claim.section === target.section &&
+        claim.itemId === target.itemId &&
+        (claim.projectId ?? null) === (target.projectId ?? null) &&
+        claim.status !== undefined &&
+        claim.status in WARNING_TEXT
+    )
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  if (flagged.length === 0) return null
+  return (
+    <ul className="point-warnings" aria-label="Points that need a look">
+      {flagged.map((claim) => (
+        <li key={claim.id}>
+          <span aria-hidden="true">⚠ </span>
+          <q>{claim.content}</q> — {WARNING_TEXT[claim.status as string]} Edit it or
+          keep it.
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 const MAX_FOLLOW_UPS = 2
 
 /** The writing team's open questions about one entry, each with a box to answer. */
@@ -211,11 +253,13 @@ function ProjectList({
   item,
   section,
   rewrite,
+  claims,
   disabled,
 }: {
   item: ResumeItem
   section: string
   rewrite: RewriteControls
+  claims: DerivedClaim[]
   disabled: boolean
 }) {
   const projects = item.projects ?? []
@@ -247,6 +291,12 @@ function ProjectList({
                 target={{ section, itemId: item.id, projectId: project.id }}
                 controls={rewrite}
                 disabled={disabled}
+              />
+            )}
+            {!isArchived && (
+              <PointWarnings
+                claims={claims}
+                target={{ section, itemId: item.id, projectId: project.id }}
               />
             )}
             {!isArchived && (
@@ -468,10 +518,15 @@ export function ResumeEditor({
                             disabled={contentLocked}
                           />
                         )}
+                        <PointWarnings
+                          claims={payload.claims ?? []}
+                          target={{ section: sectionKey, itemId: item.id }}
+                        />
                         <ProjectList
                           item={item}
                           section={sectionKey}
                           rewrite={rewrite}
+                          claims={payload.claims ?? []}
                           disabled={contentLocked}
                         />
                         {sectionKey === 'projects' && contact.projectLinks[item.id] && (

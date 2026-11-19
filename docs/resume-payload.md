@@ -233,7 +233,7 @@ Point fields:
 | `issues` | array | Problems found with it (`[]` OK) |
 | `origin` | string | `legacy`, `ai`, `user`, or `imported` |
 
-`new_point` refuses an unknown `status` or `origin`. Points written by the existing add/update/enrich paths are `legacy` and `unchecked`.
+`new_point` refuses an unknown `status` or `origin`. Points written by the existing add/update/enrich paths are `legacy` and `unchecked`. A point the person changes by hand (`update_item` bullets) is written with origin `user` and status `user_edited`, which clears any warning. The editor shows a note for `needs_review` and `unchecked` points; it never blocks saving or downloading and is never printed on the resume.
 
 ### Points are the source; `bullets` is a copy
 
