@@ -35,6 +35,13 @@ Text (or voice→STT) → LLM proposes CareerOperations
 ## Run locally
 
 ```bash
+# Everything at once: database, API and website (Ctrl+C stops them; KEEP_DB=1 keeps the database up)
+bash scripts/dev.sh
+```
+
+Or step by step:
+
+```bash
 # Database (Postgres 16 in Docker, data kept in the resume-builder-db-data volume)
 docker compose up -d
 

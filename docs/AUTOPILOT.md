@@ -162,7 +162,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Done when: offline evals cover that the key is used for the request, never stored in the
   database or traces, and is redacted from errors and logs; lint/build pass.
 
-### [ ] T10. One-command local start
+### [x] T10. One-command local start
 - `scripts/dev.sh`: start Postgres with `docker compose`, apply the SQL files in `api/db/` if
   needed, start the API and the website, stop everything on Ctrl+C.
 - Done when: `bash -n scripts/dev.sh` passes; README run section uses it; manual check added.
@@ -194,6 +194,7 @@ with Parth, not by autopilot.
 - T6: print preview (Chrome and Safari) of the resume: only the resume page shows, on A4 and US Letter, text is selectable in the saved PDF, entries do not split across pages, no warnings/story/debug panels. As a guest, "Download PDF" asks to log in first.
 - T7: open the left panel: it reads "Change your resume in plain words"; "Tailor to a job" makes a version; "Why is this line here?" shows only fact text (no raw story); "History" shows readable times and restore works. "Developer tools (for debugging)" is closed by default and holds the JSON and event log.
 - T9: paste a key after hitting the limit (or any time via the box): the call works, the chip "Using your own key" shows, a reload of the tab keeps it, closing the tab forgets it; check the server database/traces/logs never contain it; "Remove my key" goes back to the free limit; a voice call with their key works.
+- T10: run `bash scripts/dev.sh` with Docker and a real `api/.env`: Postgres, API (8081) and website start; open the site; Ctrl+C stops all three.
 
 ## Log
 
@@ -221,3 +222,4 @@ with Parth, not by autopilot.
 - 2026-11-19 13:58 UTC — STARTED T9 (autopilot)
 - 2026-11-19 14:10 UTC — T9 done (autopilot). New api/byok.py: the key comes in the `X-OpenAI-Key` header (pure ASGI middleware, held in a context variable for that request only), every OpenAI call (chat, rewrite, analyst/writer, jd, PDF import, enrichment, Realtime token) uses `api_key()`; requests with their key are not counted by the daily limit; keys are redacted from HTTP error bodies, log lines/exceptions and traces. Website: `api/ownKey.ts` (sessionStorage, header added to API calls only) and the `OwnKeyBox` that opens on the limit's 429. New eval `own_key`; live_path_guard now also recognises the per-request client. Evals 48/48, lint clean, build passes. Manual check added.
 - 2026-11-19 14:58 UTC — STARTED T10 (autopilot)
+- 2026-11-19 15:02 UTC — T10 done (autopilot). `scripts/dev.sh` starts Postgres (`docker compose up -d --wait`), the API and the website, installs missing venv/node_modules, stops everything on Ctrl+C (KEEP_DB=1 keeps the database). Tables are created by the API on startup from `api/db/*.sql`, so the script does not apply them. README run section uses it. `bash -n` passes. Manual check added.
