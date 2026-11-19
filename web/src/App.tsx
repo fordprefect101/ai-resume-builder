@@ -27,7 +27,12 @@ import {
   type ResumePayload,
 } from './types/resume'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
-import { handleToolCallEvent, toolsAreRunning } from './voice/handleRealtimeTools'
+import {
+  handleToolCallEvent,
+  notePersonTurn,
+  resetPersonTurns,
+  toolsAreRunning,
+} from './voice/handleRealtimeTools'
 import './styles/app.css'
 
 // Voice events that mean the assistant's reply has started playing. With a WebRTC
@@ -166,6 +171,7 @@ function App() {
     try {
       setVoice('understanding', 'Connecting…')
       sessionIdRef.current = targetSessionId
+      resetPersonTurns()
       const holder: { current: RealtimeHandles | null } = { current: null }
 
       const handles = await startRealtimeSession(targetSessionId, async (event) => {
@@ -194,6 +200,8 @@ function App() {
             `${type}: ${JSON.stringify(event).slice(0, 200)}`,
           ])
         }
+
+        notePersonTurn(event)
 
         if (type === 'response.function_call_arguments.done') {
           setVoice('understanding')

@@ -1457,6 +1457,102 @@ def test_voice_can_end_call() -> bool:
     return ok
 
 
+def test_story_keeps_persons_words() -> bool:
+    """The person's own turns become an entry's (or project's) story; the assistant's never."""
+    import main
+    import story_chunks
+    from story_chunks import add_story_chunks, with_story
+    import work_projects
+
+    problems = []
+    base = load_fixture("sample_career.json")
+
+    # An old resume keeps its legacy chunks when no words arrive.
+    job = next(i for i in base["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    if not job["story"] or any(c["source"] != "legacy" for c in job["story"]):
+        problems.append("old resume did not load with legacy chunks")
+    if with_story(base, "experience", "exp_chaishots", [], "voice") != base:
+        problems.append("no turns changed the story")
+
+    # Voice turns on an entry replace the legacy copy and keep only the person's words.
+    said = ["I built the matching service", "It cut wait time by half"]
+    out = with_story(base, "experience", "exp_chaishots", said, "voice")
+    job2 = next(i for i in out["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    texts = [c["text"] for c in job2["story"]]
+    if texts != said:
+        problems.append(f"entry story={texts}")
+    if any(c["source"] != "voice" or not c["id"] or not c["at"] for c in job2["story"]):
+        problems.append("chunks lack source, id or time")
+    typed = with_story(out, "experience", "exp_chaishots", ["typed words"], "typed")
+    job3 = next(i for i in typed["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    if [c["source"] for c in job3["story"]] != ["voice", "voice", "typed"]:
+        problems.append("typed words were not added with source typed")
+    if len({c["id"] for c in job3["story"]}) != 3:
+        problems.append("chunk ids are not unique")
+
+    # A project inside a job gets its own story; the job's is untouched.
+    proj = _with_project(base)
+    out = with_story(proj, "experience", "exp_chaishots", ["the engine used embeddings"], "voice", project_id="wp_rec")
+    job4 = next(i for i in out["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")
+    pr = next(p for p in job4["projects"] if p["id"] == "wp_rec")
+    if [c["text"] for c in pr["story"]] != ["the engine used embeddings"]:
+        problems.append("project story not stored")
+    if job4["story"] != next(i for i in proj["inventory"]["sections"]["experience"]["items"] if i["id"] == "exp_chaishots")["story"]:
+        problems.append("job story changed when a project's words were added")
+
+    # The cap keeps the newest words and stays under the pipeline's limit.
+    from writing.pipeline import MAX_STORY_CHARS as PIPELINE_LIMIT
+    lines = [f"turn {n} " + "x" * 900 for n in range(12)]
+    capped = add_story_chunks({"story": []}, lines, "voice")["story"]
+    total = sum(len(c["text"]) for c in capped)
+    if total > story_chunks.MAX_STORY_CHARS or story_chunks.MAX_STORY_CHARS >= PIPELINE_LIMIT:
+        problems.append(f"cap not kept (total={total})")
+    if not capped or not capped[-1]["text"].startswith("turn 11"):
+        problems.append("newest turn was not kept")
+    one = add_story_chunks({"story": []}, ["y" * 9000], "voice")["story"]
+    if len(one) != 1 or len(one[0]["text"]) > story_chunks.MAX_TURN_CHARS:
+        problems.append("one huge turn was not trimmed")
+    try:
+        add_story_chunks({}, ["hi"], "assistant")
+        problems.append("a source other than voice/typed/followup was accepted")
+    except ValueError:
+        pass
+
+    # Through the real add-entry request: the person's words are stored, not the summary.
+    connection = _FakeConnection(load_fixture("sample_career.json"))
+    saved_connect, saved_user = main.psycopg.connect, main.get_current_user
+    try:
+        main.psycopg.connect = lambda *a, **k: connection
+        main.get_current_user = lambda request: None
+        body = main.AddItemBody(
+            section="experience",
+            fields={"company": "NewCo", "title": "Engineer", "bullets": ["Assistant summary line"]},
+            enrich=False,
+            storyTurns=["I ran the on-call rota", "  "],
+        )
+        result = main.tool_add_item("sess_1", body, request=None, background_tasks=BackgroundTasks())
+        item = next(
+            i for i in result["payload"]["inventory"]["sections"]["experience"]["items"]
+            if i["id"] == result["itemId"]
+        )
+        if [c["text"] for c in item["story"]] != ["I ran the on-call rota"]:
+            problems.append(f"endpoint story={item['story']}")
+        if "Assistant summary line" in json.dumps(item["story"]):
+            problems.append("assistant text reached the story")
+    except Exception as err:
+        problems.append(f"add_item request failed: {type(err).__name__}: {err}")
+    finally:
+        main.psycopg.connect, main.get_current_user = saved_connect, saved_user
+
+    # The browser keeps only the person's finished transcriptions.
+    ts = (ROOT / "web" / "src" / "voice" / "handleRealtimeTools.ts").read_text()
+    if "conversation.item.input_audio_transcription.completed" not in ts or "output_audio_transcript" in ts:
+        problems.append("browser must collect only the person's transcription events")
+    ok = not problems
+    print(f"story_keeps_persons_words: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -3940,6 +4036,7 @@ def main() -> int:
         test_assistant_result_is_small_and_constant,
         test_live_path_guard,
         test_voice_can_end_call,
+        test_story_keeps_persons_words,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,

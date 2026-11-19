@@ -118,7 +118,7 @@ def run_chat(payload: dict, message: str) -> dict:
         for call in choice.tool_calls:
             name = call.function.name
             args = json.loads(call.function.arguments or "{}")
-            current, summary = execute_tool(current, name, args)
+            current, summary = execute_tool(current, name, args, typed_words=message)
             tools_called.append({"name": name, "arguments": args, "result": summary})
             messages.append(
                 {

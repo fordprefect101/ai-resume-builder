@@ -17,6 +17,7 @@ from enrichment import enrich_section_item
 from facts import sync_facts_from_item
 from timing import timed
 import work_projects
+from story_chunks import with_story
 from context_selector import select_resume_context
 
 # Re-export for callers that import catalogs from chat_tools
@@ -313,7 +314,9 @@ def voice_tools_for_payload(payload: dict) -> list[dict]:
     return [*tools_for_payload(payload), END_VOICE_SESSION_TOOL]
 
 
-def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]:
+def execute_tool(
+    payload: dict, name: str, arguments: dict, typed_words: str | None = None
+) -> tuple[dict, dict]:
     if name == "search_resume_context":
         return payload, {
             "ok": True,
@@ -373,6 +376,7 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
             arguments.get("confirmedEmptyFields") or [],
         )
         new_payload, new_id = add_item(payload, section, fields)
+        new_payload = with_story(new_payload, section, new_id, [typed_words], "typed")
         item = get_item(new_payload, section, new_id)
         with timed("tidy_up"):
             enrichment = enrich_section_item(section, item)
@@ -418,6 +422,9 @@ def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]
             arguments["name"],
             technologies=arguments.get("technologies"),
             bullets=arguments.get("bullets"),
+        )
+        new_payload = with_story(
+            new_payload, section, arguments["itemId"], [typed_words], "typed", project_id=project_id
         )
         job = get_item(new_payload, section, arguments["itemId"])
         project = work_projects.get_project(new_payload, section, arguments["itemId"], project_id)

@@ -8,6 +8,31 @@ type ToolCall = {
   arguments: string
 }
 
+// The person's own transcribed words since the last entry was saved. Only the person's
+// turns are kept, never the assistant's. They are sent with add_item / add_project and
+// stored by the server as that entry's story; the screen never shows them.
+const MAX_BUFFERED_TURNS = 20
+let personTurns: string[] = []
+
+export function resetPersonTurns() {
+  personTurns = []
+}
+
+/** Remember a finished transcription of the person speaking; ignore every other event. */
+export function notePersonTurn(event: Record<string, unknown>) {
+  if (event.type !== 'conversation.item.input_audio_transcription.completed') return
+  const text = typeof event.transcript === 'string' ? event.transcript.trim() : ''
+  if (!text) return
+  personTurns = [...personTurns, text].slice(-MAX_BUFFERED_TURNS)
+}
+
+// Hand the buffered turns over once, so one entry never repeats another's words.
+function takePersonTurns(): string[] {
+  const turns = personTurns
+  personTurns = []
+  return turns
+}
+
 export async function runResumeTool(
   sessionId: string,
   name: string,
@@ -108,6 +133,8 @@ export async function runResumeTool(
           section: args.section,
           fields: args.fields ?? {},
           confirmedEmptyFields: args.confirmedEmptyFields ?? [],
+          storyTurns: takePersonTurns(),
+          storySource: 'voice',
         }),
       }
     )
@@ -176,6 +203,10 @@ export async function runResumeTool(
     const body = Object.fromEntries(
       Object.entries(projectTools[name]).filter(([, value]) => value !== undefined)
     )
+    if (name === 'add_project') {
+      body.storyTurns = takePersonTurns()
+      body.storySource = 'voice'
+    }
     const res = await fetch(
       `${API_BASE}/resume/${encodeURIComponent(sessionId)}/tools/${name}`,
       {

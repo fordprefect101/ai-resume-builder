@@ -97,8 +97,10 @@ Sections whose registry profile also has `holdsProjects: true` (only `experience
 |-------|------|-------|
 | `id` | string | Stable |
 | `text` | string | What was said |
-| `source` | string | Where it came from. Only `legacy` is written today (a bullet that existed before stories were captured) |
+| `source` | string | `voice` (the person's transcribed speech), `typed` (typed chat), `followup` (reserved for answers to follow-up questions) or `legacy` (a bullet that existed before stories were captured) |
 | `at` | string \| null | ISO timestamp; `null` for `legacy` |
+
+Only the person's words are stored, never the assistant's. `add_item` and `add_project` accept `storyTurns` (the person's turns about the entry) and `storySource` (`voice` or `typed`); the chunks are added to the entry's (or project's) story, `legacy` chunks are dropped once real words arrive, and the newest words are kept under 4000 characters (one turn is cut at 1500). The story is never shown in the UI. Code: `api/story_chunks.py`.
 
 `writing`:
 

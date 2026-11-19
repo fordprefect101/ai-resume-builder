@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 import psycopg
 from dotenv import load_dotenv
@@ -26,6 +26,7 @@ from facts import sync_facts_from_item
 from jd_analyze import analyze_job_description, create_job_variant
 from mutation_pipeline import run_mutation
 from payload_normalize import normalize_payload
+from story_chunks import with_story
 from pdf_import import PdfImportError, import_pdf_bytes
 from realtime import create_realtime_client_secret
 from retrieval import retrieve_evidence
@@ -143,6 +144,8 @@ class AddProjectBody(BaseModel):
     name: str
     technologies: list[str] = []
     bullets: list[str] = []
+    storyTurns: list[str] = []  # what the person said about this project, their own words
+    storySource: Literal["voice", "typed"] = "voice"
 
 
 class RenameProjectBody(BaseModel):
@@ -170,6 +173,8 @@ class AddItemBody(BaseModel):
     itemId: str | None = None
     enrich: bool = True
     confirmedEmptyFields: list[str] = []
+    storyTurns: list[str] = []  # what the person said about this entry, their own words
+    storySource: Literal["voice", "typed"] = "voice"
 
 
 class RewriteBody(BaseModel):
@@ -961,6 +966,9 @@ def tool_add_item(
                         new_payload = apply_item_enrichment(
                             new_payload, body.section, new_id, enrichment
                         )
+                new_payload = with_story(
+                    new_payload, body.section, new_id, body.storyTurns, body.storySource
+                )
                 item = get_item(new_payload, body.section, new_id)
                 new_payload = sync_facts_from_item(new_payload, body.section, item)
             except KeyError as err:
@@ -1094,6 +1102,10 @@ def tool_add_project(session_id: str, body: AddProjectBody, request: Request):
                     body.name,
                     technologies=body.technologies,
                     bullets=body.bullets,
+                )
+                new_payload = with_story(
+                    new_payload, body.section, body.itemId, body.storyTurns,
+                    body.storySource, project_id=project_id,
                 )
                 job = get_item(new_payload, body.section, body.itemId)
                 project = work_projects.get_project(

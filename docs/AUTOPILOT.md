@@ -82,7 +82,7 @@ Today the call only ends when the person presses the button; `complete_intake` d
 - Done when: offline eval checks the tool is in the voice tool list and not the chat one, and the
   instructions mention it; lint/build pass. Manual check added.
 
-### [ ] T2. Save the person's own words as the story
+### [x] T2. Save the person's own words as the story
 Today the story is a copy of the bullets the voice assistant summarised (`legacy_story` in
 `api/payload_normalize.py`), so the analyst never sees what the person really said.
 - The Realtime session already transcribes speech (`gpt-4o-mini-transcribe` in `api/realtime.py`).
@@ -184,6 +184,7 @@ with Parth, not by autopilot.
 
 (Things to try in the final local session with a real key, a microphone and a browser.)
 
+- T2: describe a job by voice, then check the saved entry's `story` holds your own spoken sentences (`source: "voice"`), none of the assistant's words, and that nothing shows them on screen.
 - T1: finish an intake by voice: the assistant says goodbye, the call ends by itself after the goodbye
   audio (not mid-sentence), and the screen shows "All done". Also say "that's all" in edit mode. The
   stop button must still work. Check it never hangs up while a tool is running.
@@ -198,3 +199,4 @@ with Parth, not by autopilot.
 - 2026-11-19 06:14 UTC — STARTED T1 (autopilot)
 - 2026-11-19 06:30 UTC — T1 done (autopilot). New voice-only tool `end_voice_session` (api/chat_tools.py `voice_tools_for_payload`, not in chat); instructions in api/realtime.py (`END_CALL_RULE`); browser waits for goodbye audio and running tools, then calls the button's stop. New eval `voice_can_end_call`. Evals 43/43, lint clean, build passes. Manual check added.
 - 2026-11-19 06:58 UTC — STARTED T2 (autopilot)
+- 2026-11-19 07:01 UTC — T2 done (autopilot). New api/story_chunks.py; add_item/add_project take storyTurns (voice) and the text chat stores the typed message (source typed); browser collects only the person's finished transcriptions and sends them with those two tools. Cap 4000 chars, newest kept; legacy chunks dropped once real words arrive. New eval `story_keeps_persons_words`. Evals 44/44, lint clean, build passes. Manual check added.
