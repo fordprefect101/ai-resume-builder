@@ -37,7 +37,7 @@ def ensure_base_schema() -> None:
 
 
 def ensure_v2_schema() -> None:
-    _run_sql_files("v2.sql")
+    _run_sql_files("v2.sql", "usage.sql")
 
 
 def record_version(

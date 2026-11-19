@@ -16,6 +16,9 @@ Everything lives in `run_evals.py` and uses `fixtures/sample_career.json`.
 The contact checks (shape rules, the safe link opener, lookups replayed from recorded
 answers, the gate, privacy, background lookups and project links) are described in
 `docs/CONTACT-CHECKS.md`; none of them touches the internet.
+The daily limits (`api/usage_limits.py`) are checked by `daily_limits`: counting per visitor and
+kind, the limit, the UTC-midnight reset, the 429 message, and that every endpoint that calls a
+paid model counts first. The other cases run with that counting switched off.
 `timing_report.py` is not a check: it summarizes the server's timing log (see `docs/SPEED.md`).
 
 ## Website render check

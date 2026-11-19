@@ -143,7 +143,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Move the JSON console and Realtime event log behind one "Developer tools" toggle, off by default.
 - Done when: lint/build pass; manual check added.
 
-### [ ] T8. Daily limits per visitor
+### [x] T8. Daily limits per visitor
 - One place that counts AI use per visitor per day: logged-in user id, else session id. Store in
   Postgres (new table in `api/db/`, created like the others).
 - Cover every endpoint that spends money: chat, Realtime token (count call minutes or sessions),
@@ -216,3 +216,4 @@ with Parth, not by autopilot.
 - 2026-11-19 11:59 UTC — STARTED T7 (autopilot)
 - 2026-11-19 12:05 UTC — T7 done (autopilot). IntelligencePanel rewritten in plain words: "Tailor to a job", "Why is this line here?" (fact content only), "History" (readable times, go back); the technical messages renamed; JSON console and event log stay inside the closed "Developer tools (for debugging)" toggle. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
 - 2026-11-19 12:58 UTC — STARTED T8 (autopilot)
+- 2026-11-19 13:01 UTC — T8 done (autopilot). New api/usage_limits.py + api/db/usage.sql (`usage_counts`, per visitor/kind/UTC day, created with the v2 schema). `charge` refuses with a 429 that says when it resets and offers own key; counted: chat, mutate, Realtime token (per call), rewrite, analyze-jd, PDF import, enrichment (over the limit the entry is added without tidy-up). Limits `DAILY_LIMIT_*` in api/.env.example. New eval `daily_limits`. Evals 47/47, lint clean, build passes. Website does not yet offer the own-key box (T9).

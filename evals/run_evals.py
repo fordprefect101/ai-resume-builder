@@ -1681,6 +1681,99 @@ def test_single_save_door() -> bool:
     return ok
 
 
+def test_daily_limits() -> bool:
+    """Counting, the limit, the reset, and that every paid endpoint goes through the counter."""
+    from datetime import datetime, timezone
+    import usage_limits
+
+    class FakeCursor:
+        """Behaves like the one upsert in usage_limits: rows keyed by visitor, kind, day."""
+
+        def __init__(self, rows):
+            self.rows, self.result = rows, None
+
+        def execute(self, sql, params):
+            assert "usage_counts" in sql
+            visitor, kind, day, amount, limit = params
+            key = (visitor, kind, day)
+            total = self.rows.get(key, 0) + amount
+            if total <= limit:
+                self.rows[key] = total
+                self.result = (total,)
+            else:
+                self.result = None
+
+        def fetchone(self):
+            return self.result
+
+    problems: list[str] = []
+    rows: dict = {}
+    cur = FakeCursor(rows)
+    day1 = datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc)
+    day2 = datetime(2026, 11, 20, 0, 1, tzinfo=timezone.utc)
+    os.environ["DAILY_LIMIT_CHAT"] = "2"
+    try:
+        got = [usage_limits.charge_cursor(cur, "session:a", "chat", now=day1) for _ in range(3)]
+        if got != [True, True, False]:
+            problems.append(f"limit of 2: {got}")
+        if not usage_limits.charge_cursor(cur, "session:b", "chat", now=day1):
+            problems.append("another visitor shares the count")
+        if not usage_limits.charge_cursor(cur, "session:a", "rewrite", now=day1):
+            problems.append("kinds share a count")
+        if not usage_limits.charge_cursor(cur, "session:a", "chat", now=day2):
+            problems.append("the count did not reset on the next UTC day")
+        if rows.get(("session:a", "chat", day1.date())) != 2:
+            problems.append("a refused call was counted")
+    finally:
+        os.environ.pop("DAILY_LIMIT_CHAT", None)
+    if usage_limits.limit_for("realtime") != 5:
+        problems.append("default limit missing")
+    message = usage_limits.over_limit_message("chat", day1)
+    if "00:00 UTC" not in message or "your own" not in message:
+        problems.append(f"message does not say when it resets and the own-key option: {message!r}")
+
+    class Req:
+        client = type("C", (), {"host": "1.2.3.4"})()
+
+    if usage_limits.visitor_key(Req(), {"id": 7}, "s1") != "user:7":
+        problems.append("a logged-in user is not counted by user id")
+    if usage_limits.visitor_key(Req(), None, "s1") != "session:s1":
+        problems.append("a guest is not counted by session id")
+
+    # Every function in main.py that calls a paid model must charge first.
+    paid = {
+        "run_chat", "run_mutation", "analyze_job_description", "create_job_variant",
+        "create_realtime_client_secret", "import_pdf_bytes", "run_pipeline", "enrich_section_item",
+    }
+    source = (ROOT / "api" / "main.py").read_text()
+    guarded = set()
+    for node in ast.parse(source).body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        called = {
+            (n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
+            for n in ast.walk(node) if isinstance(n, ast.Call)
+        }
+        spent = called & paid
+        if spent:
+            guarded.add(node.name)
+            if not called & {"charge", "spend"}:
+                problems.append(f"{node.name} calls {sorted(spent)} without counting")
+    for name in ("chat", "mutate_resume", "analyze_jd", "realtime_token", "import_resume_pdf",
+                 "rewrite_entry", "tool_add_item"):
+        if name not in guarded:
+            problems.append(f"{name} is not recognised as a paid endpoint")
+    # Every limit is listed in .env.example.
+    example = (ROOT / "api" / ".env.example").read_text()
+    for setting, _ in usage_limits.LIMITS.values():
+        if f"{setting}=" not in example:
+            problems.append(f"{setting} missing from .env.example")
+
+    ok = not problems
+    print(f"daily_limits: {'PASS' if ok else 'FAIL'} (paid endpoints counted={len(guarded)}, problems={problems})")
+    return ok
+
+
 def test_example_record_is_current() -> bool:
     path = ROOT / "api" / "resume-schema.example.json"
 
@@ -4135,10 +4228,18 @@ def main() -> int:
         test_follow_up_questions,
         test_hand_edit_clears_warning,
         test_single_save_door,
+        test_daily_limits,
         test_example_record_is_current,
         test_env_example_lists_settings,
         test_timing_log,
     ]
+    # The scripted databases in the cases above know nothing of the usage table, so the
+    # endpoints' counting is switched off here. test_daily_limits checks the counting
+    # itself and that every paid endpoint calls it.
+    import main as api_main
+
+    api_main.charge = lambda *a, **k: None
+    api_main.spend = lambda *a, **k: True
     results = [t() for t in tests]
     passed = sum(results)
     print(f"\n{passed}/{len(tests)} eval cases passed")

@@ -60,6 +60,7 @@ from resume_ops import (
     set_skills,
     validate_intake_item_fields,
 )
+from usage_limits import charge, spend
 from timing import TimingMiddleware, timed
 from undo import pop_undo, push_undo
 import work_projects
@@ -703,6 +704,7 @@ def rewrite_entry(session_id: str, body: RewriteBody, request: Request):
                 )
 
     entry = writing_store.entry_for(item, level, body.section)
+    charge(request, user, "rewrite", session_id)
     result = writing_pipeline.run_pipeline(story, entry)
     if result.stage == "guard":  # refused before any model was called: nothing to record
         raise HTTPException(status_code=400, detail=result.error)
@@ -968,7 +970,10 @@ def tool_add_item(
                     body.fields,
                     item_id=body.itemId,
                 )
-                if body.enrich:
+                # Over today's limit: the entry is still added, just not tidied up.
+                if body.enrich and spend(
+                    request, get_current_user(request), "enrichment", session_id
+                ):
                     item = get_item(new_payload, body.section, new_id)
                     with timed("tidy_up"):
                         enrichment = enrich_section_item(body.section, item)
@@ -1403,6 +1408,7 @@ def mutate_resume(
             previous = normalize_payload(row[1])
             try:
                 require_basics_verified(previous)
+                charge(request, get_current_user(request), "mutate", session_id)
                 result, trace = run_mutation(previous, body.message)
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
@@ -1508,6 +1514,7 @@ def analyze_jd(session_id: str, body: AnalyzeJdBody, request: Request):
             previous = normalize_payload(row[1])
             try:
                 require_basics_verified(previous)
+                charge(request, get_current_user(request), "analyze_jd", session_id)
                 analysis = analyze_job_description(previous, body.jobDescription)
                 new_payload = previous
                 variant_id = None
@@ -1589,6 +1596,11 @@ def chat(body: ChatBody, request: Request):
 
             try:
                 require_basics_verified(previous_payload)
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+            # Outside the try below: a 429 must not turn into a 500.
+            charge(request, get_current_user(request), "chat", body.sessionId)
+            try:
                 result = run_chat(previous_payload, body.message)
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
@@ -1630,6 +1642,7 @@ async def import_resume_pdf(request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="pdf_required")
 
     file_bytes = await file.read()
+    charge(request, get_current_user(request), "pdf_import")
 
     try:
         payload = normalize_payload(import_pdf_bytes(file_bytes))
@@ -1674,6 +1687,10 @@ def realtime_token(sessionId: str, request: Request):
     payload = normalize_payload(row[1])
     try:
         require_basics_verified(payload)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    charge(request, get_current_user(request), "realtime", sessionId)
+    try:
         data = create_realtime_client_secret(payload)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
