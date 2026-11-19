@@ -516,6 +516,22 @@ function App() {
     }
   }
 
+  function handleDownloadPdf() {
+    const currentId = sessionIdRef.current
+    if (!currentId || currentId === 'demo') {
+      setStatus('Start a resume before downloading')
+      return
+    }
+    // Same rule as Save: a guest signs up or logs in first.
+    if (!user) {
+      localStorage.setItem('pendingClaimSessionId', currentId)
+      openAuth('Log in to download your resume')
+      return
+    }
+    // The print stylesheet shows only the resume page; "Save as PDF" keeps the text selectable.
+    window.print()
+  }
+
   async function handleLogout() {
     handleStopVoice()
     await logout().catch(() => undefined)
@@ -594,6 +610,7 @@ function App() {
       onStartVoice={() => handleStartVoice()}
       onStopVoice={handleStopVoice}
       onSaveToAccount={handleSaveToAccount}
+      onDownloadPdf={handleDownloadPdf}
       onLogout={handleLogout}
       onOpenAuth={() => openAuth('Welcome back')}
       onGoHome={() => {

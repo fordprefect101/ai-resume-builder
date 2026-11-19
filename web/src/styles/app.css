@@ -1226,3 +1226,47 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Print / Save as PDF: only the resume page, as real text, on A4 or US Letter. */
+@page {
+  margin: 14mm 15mm;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .resume-paper,
+  .resume-paper * {
+    visibility: visible;
+  }
+
+  .resume-paper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    background: #fff;
+    box-shadow: none;
+    font-size: 11pt;
+  }
+
+  .resume-header,
+  .resume-section > h2,
+  .resume-item-heading,
+  .resume-project-heading {
+    break-after: avoid;
+  }
+
+  .resume-item,
+  .resume-project {
+    break-inside: avoid;
+  }
+
+  .resume-item li {
+    break-inside: avoid;
+  }
+}

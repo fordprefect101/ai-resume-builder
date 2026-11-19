@@ -27,6 +27,7 @@ type Props = {
   onStartVoice: () => void
   onStopVoice: () => void
   onSaveToAccount: () => void
+  onDownloadPdf: () => void
   onLogout: () => void
   onOpenAuth: () => void
   onGoHome: () => void
@@ -62,6 +63,7 @@ export function WorkspaceScreen({
   onStartVoice,
   onStopVoice,
   onSaveToAccount,
+  onDownloadPdf,
   onLogout,
   onOpenAuth,
   onGoHome,
@@ -103,6 +105,9 @@ export function WorkspaceScreen({
           </div>
           <button type="button" onClick={onSaveToAccount}>
             {user ? 'Save' : 'Keep this'}
+          </button>
+          <button type="button" onClick={onDownloadPdf}>
+            Download PDF
           </button>
           {user ? (
             <>

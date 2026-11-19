@@ -128,7 +128,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Editing a point by hand clears its warning (it becomes the person's own point).
 - Done when: offline eval covers that a hand edit clears the status; lint/build pass.
 
-### [ ] T6. Download as PDF
+### [x] T6. Download as PDF
 - A "Download PDF" button in the workspace. Use a print stylesheet so only the resume page prints
   (no app chrome), selectable text (good for applicant tracking systems), A4 and US Letter both
   fitting, sensible page breaks between entries.
@@ -191,6 +191,7 @@ with Parth, not by autopilot.
 - T3: with a real key, finish describing a job by voice. When the call ends, the entry shows "Writing your points…" and then new checked points appear, without a page reload. While the call is open nothing is rewritten. "Rewrite points" re-runs it; after editing a point by hand it asks "Replace my points / Keep mine". Stop the API mid-run: the old points stay and "Try again" shows.
 - T4: with a real key, finish a job by voice so the writing team returns questions. Open a new call: the assistant asks them one at a time (max 2 per entry), accepts "I don't know", and your spoken answer lands in the story (`source: "followup"`), then the points rewrite after the call. In text mode the questions show under the entry with Answer / Skip.
 - T5: with a real key, make the writing team simplify a line: the entry shows a warning under it. Edit that line by chat ("change that point to …"): the warning goes. Saving and the preview/download are never blocked, and the resume page shows no warning.
+- T6: print preview (Chrome and Safari) of the resume: only the resume page shows, on A4 and US Letter, text is selectable in the saved PDF, entries do not split across pages, no warnings/story/debug panels. As a guest, "Download PDF" asks to log in first.
 
 ## Log
 
@@ -210,3 +211,4 @@ with Parth, not by autopilot.
 - 2026-11-19 09:58 UTC — STARTED T5 (autopilot)
 - 2026-11-19 10:10 UTC — T5 done (autopilot). A point written by the person's own edit (`update_item` bullets) now gets origin `user` and status `user_edited` (`new_point` in api/claims.py), so its warning clears; unchanged points keep theirs. Editor shows a `PointWarnings` note under each entry/project for `needs_review` / `unchecked` points; the resume preview never shows it. New eval `hand_edit_clears_warning`. Evals 46/46, lint clean, build passes. Manual check added.
 - 2026-11-19 10:58 UTC — STARTED T6 (autopilot)
+- 2026-11-19 11:05 UTC — T6 done (autopilot). "Download PDF" button in the workspace toolbar (guests are asked to log in first, like Save) calls the browser print; print stylesheet in web/src/styles/app.css shows only `.resume-paper`, @page margins fit A4 and Letter, page breaks kept between entries. Preview never renders warnings/story. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
