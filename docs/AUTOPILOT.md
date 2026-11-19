@@ -96,7 +96,7 @@ Today the story is a copy of the bullets the voice assistant summarised (`legacy
 - Done when: offline evals cover storing chunks on an item and on a project inside a job, the cap,
   that assistant text is never stored, and that old resumes still load; docs updated.
 
-### [ ] T3. Writing team runs automatically, plus a re-run button
+### [x] T3. Writing team runs automatically, plus a re-run button
 The backend `POST /resume/{id}/rewrite` exists and is tested; nothing in the website calls it.
 - Add `rewriteEntry()` to `web/src/api/resumeApi.ts`.
 - After an entry's story is saved or changed (T2), call it in the background for that entry. The
@@ -188,6 +188,7 @@ with Parth, not by autopilot.
 - T1: finish an intake by voice: the assistant says goodbye, the call ends by itself after the goodbye
   audio (not mid-sentence), and the screen shows "All done". Also say "that's all" in edit mode. The
   stop button must still work. Check it never hangs up while a tool is running.
+- T3: with a real key, finish describing a job by voice. When the call ends, the entry shows "Writing your points…" and then new checked points appear, without a page reload. While the call is open nothing is rewritten. "Rewrite points" re-runs it; after editing a point by hand it asks "Replace my points / Keep mine". Stop the API mid-run: the old points stay and "Try again" shows.
 
 ## Log
 
@@ -201,3 +202,4 @@ with Parth, not by autopilot.
 - 2026-11-19 06:58 UTC — STARTED T2 (autopilot)
 - 2026-11-19 07:01 UTC — T2 done (autopilot). New api/story_chunks.py; add_item/add_project take storyTurns (voice) and the text chat stores the typed message (source typed); browser collects only the person's finished transcriptions and sends them with those two tools. Cap 4000 chars, newest kept; legacy chunks dropped once real words arrive. New eval `story_keeps_persons_words`. Evals 44/44, lint clean, build passes. Manual check added.
 - 2026-11-19 07:58 UTC — STARTED T3 (autopilot)
+- 2026-11-19 08:01 UTC — T3 done (autopilot). `rewriteEntry()` in web/src/api/resumeApi.ts; new hook web/src/components/resume/useAutoRewrite.ts runs the writing team in the background when an entry's story changes (waits while a voice call is open, never from the voice path); plain-words handling of skipped, 409 (ask before replacing edited points; changed meanwhile: run once more), 429, 502; "Rewrite points" button (force) on each experience/project entry and project inside a job. No new offline eval (browser-only change; backend already covered). Evals 44/44, lint clean, build passes. Manual check added.

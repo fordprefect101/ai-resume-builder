@@ -297,3 +297,59 @@ export async function getClaimProvenance(
   }
   return res.json()
 }
+export type RewriteTarget = {
+  section: string
+  itemId: string
+  projectId?: string | null
+}
+
+export type RewriteResponse = {
+  sessionId: string
+  version: number
+  /** The story has not changed since the points were written: nothing was done. */
+  skipped?: boolean
+  reason?: string
+  payload?: unknown
+}
+
+/** A failed rewrite, with the HTTP status so the caller can answer in plain words. */
+export class RewriteError extends Error {
+  status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.status = status
+  }
+}
+
+/**
+ * Ask the writing team to (re)write one entry's points from its story. Slow, so it
+ * is only ever called from the editor in the background, never from the voice path.
+ */
+export async function rewriteEntry(
+  sessionId: string,
+  target: RewriteTarget,
+  options: { force?: boolean; replaceEdited?: boolean } = {}
+): Promise<RewriteResponse> {
+  const res = await fetch(
+    `${API_BASE}/resume/${encodeURIComponent(sessionId)}/rewrite`,
+    {
+      ...creds,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section: target.section,
+        itemId: target.itemId,
+        projectId: target.projectId ?? null,
+        force: Boolean(options.force),
+        replaceEdited: Boolean(options.replaceEdited),
+      }),
+    }
+  )
+  if (!res.ok) {
+    throw new RewriteError(
+      res.status,
+      await apiErrorMessage(res, `Rewrite failed: ${res.status}`)
+    )
+  }
+  return res.json()
+}

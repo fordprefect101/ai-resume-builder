@@ -33,6 +33,7 @@ import {
   resetPersonTurns,
   toolsAreRunning,
 } from './voice/handleRealtimeTools'
+import { useAutoRewrite } from './components/resume'
 import './styles/app.css'
 
 // Voice events that mean the assistant's reply has started playing. With a WebRTC
@@ -68,6 +69,13 @@ function App() {
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
   const contentLocked = !isBasicsVerified(payload) || basicsDirty
+  const rewrite = useAutoRewrite(
+    payload,
+    sessionId,
+    screen === 'workspace' && version !== null,
+    voiceActive,
+    handlePayloadUpdate
+  )
   const doneTimer = useRef<number | null>(null)
   // Speed baseline: when the person last stopped talking, and which voice events exist.
   const speechStoppedAt = useRef<number | null>(null)
@@ -597,6 +605,7 @@ function App() {
       onLoad={handleLoad}
       onSaveJson={handleSave}
       onPayloadUpdate={handlePayloadUpdate}
+      rewrite={rewrite}
       onStatus={setStatus}
       activeVariantId={activeVariantId}
       onVariantChange={setActiveVariantId}

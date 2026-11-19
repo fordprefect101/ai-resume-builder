@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 import type { AuthUser } from '../../api/authApi'
 import type { BasicsInput, ResumePayload } from '../../types/resume'
-import { ResumeEditor, ResumePreview } from '../resume'
+import { ResumeEditor, ResumePreview, type RewriteControls } from '../resume'
 import { IntelligencePanel } from '../intelligence'
 import { VoiceOrb, type VoiceMood } from '../voice'
 
 type Props = {
+  rewrite: RewriteControls
   user: AuthUser | null
   payload: ResumePayload
   status: string
@@ -69,6 +70,7 @@ export function WorkspaceScreen({
   onLoad,
   onSaveJson,
   onPayloadUpdate,
+  rewrite,
   onStatus,
   activeVariantId,
   onVariantChange,
@@ -146,6 +148,7 @@ export function WorkspaceScreen({
             onMoveItem={onMoveItem}
             onToggleItem={onToggleItem}
             onStartVoice={onStartVoice}
+            rewrite={rewrite}
           />
         </div>
         <section className="preview-pane">

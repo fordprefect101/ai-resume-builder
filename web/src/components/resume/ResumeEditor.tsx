@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { setProjectLinkPrivate } from '../../api/resumeApi'
 import { BasicsEditor } from './BasicsEditor'
 import { useContactStatus } from './useContactStatus'
+import { targetKey, type RewriteControls } from './useAutoRewrite'
+import type { RewriteTarget } from '../../api/resumeApi'
 import {
   isBasicsVerified,
   type BasicsInput,
@@ -72,11 +74,82 @@ function ProjectLinkLine({
   )
 }
 
+/** "Writing your points…", a plain-words problem, or the "Rewrite points" button. */
+function RewriteLine({
+  target,
+  controls,
+  disabled,
+}: {
+  target: RewriteTarget
+  controls: RewriteControls
+  disabled: boolean
+}) {
+  const key = targetKey(target)
+  const state = controls.states[key]
+  if (state?.kind === 'writing') {
+    return (
+      <p className="rewrite-line" role="status">
+        Writing your points…
+      </p>
+    )
+  }
+  return (
+    <div className="rewrite-line">
+      {state?.kind === 'confirm' && (
+        <>
+          <span>{state.message}</span>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void controls.run(target, { force: true, replaceEdited: true })}
+          >
+            Replace my points
+          </button>
+          <button type="button" onClick={() => controls.dismiss(key)}>
+            Keep mine
+          </button>
+        </>
+      )}
+      {state?.kind === 'error' && (
+        <>
+          <span className="contact-error">{state.message}</span>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void controls.run(target, { force: true })}
+          >
+            Try again
+          </button>
+        </>
+      )}
+      {!state && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void controls.run(target, { force: true })}
+        >
+          Rewrite points
+        </button>
+      )}
+    </div>
+  )
+}
+
 /**
  * Read-only list of a job's projects, active ones first and archived ones dimmed.
  * Projects are added, renamed, archived and reordered by voice for now.
  */
-function ProjectList({ item }: { item: ResumeItem }) {
+function ProjectList({
+  item,
+  section,
+  rewrite,
+  disabled,
+}: {
+  item: ResumeItem
+  section: string
+  rewrite: RewriteControls
+  disabled: boolean
+}) {
   const projects = item.projects ?? []
   if (projects.length === 0) return null
   const active = projects.filter((project) => project.status !== 'archived')
@@ -101,6 +174,13 @@ function ProjectList({ item }: { item: ResumeItem }) {
                 : `${points} point${points === 1 ? '' : 's'}`}
               {technologies ? ` · ${technologies}` : ''}
             </small>
+            {!isArchived && (
+              <RewriteLine
+                target={{ section, itemId: item.id, projectId: project.id }}
+                controls={rewrite}
+                disabled={disabled}
+              />
+            )}
           </li>
         )
       })}
@@ -119,6 +199,7 @@ type Props = {
   onMoveItem: (section: string, itemId: string, direction: -1 | 1) => void
   onToggleItem: (section: string, itemId: string, included: boolean) => void
   onStartVoice: () => void
+  rewrite: RewriteControls
 }
 
 function itemLabel(section: string, item: ResumeItem): string {
@@ -143,6 +224,7 @@ export function ResumeEditor({
   onMoveItem,
   onToggleItem,
   onStartVoice,
+  rewrite,
 }: Props) {
   const { skills, sections } = payload.inventory
   const { includedIds, sectionOrder } = payload.resume
@@ -295,7 +377,19 @@ export function ResumeEditor({
                             </button>
                           </div>
                         </div>
-                        <ProjectList item={item} />
+                        {(sectionKey === 'experience' || sectionKey === 'projects') && (
+                          <RewriteLine
+                            target={{ section: sectionKey, itemId: item.id }}
+                            controls={rewrite}
+                            disabled={contentLocked}
+                          />
+                        )}
+                        <ProjectList
+                          item={item}
+                          section={sectionKey}
+                          rewrite={rewrite}
+                          disabled={contentLocked}
+                        />
                         {sectionKey === 'projects' && contact.projectLinks[item.id] && (
                           <ProjectLinkLine
                             link={String(item.url ?? '')}

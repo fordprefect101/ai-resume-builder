@@ -1195,3 +1195,18 @@
     animation: none;
   }
 }
+
+.rewrite-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rewrite-line button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
