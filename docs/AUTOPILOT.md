@@ -167,7 +167,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
   needed, start the API and the website, stop everything on Ctrl+C.
 - Done when: `bash -n scripts/dev.sh` passes; README run section uses it; manual check added.
 
-### [ ] T11. README for the public
+### [x] T11. README for the public
 - Lead with what it does and why it is hard: voice in, an analyst → writer → checker team, every
   line traceable to the person's own words, nothing invented. A diagram (mermaid) of the pipeline.
 - Eval results: the offline cases and what they prove; the writing test set and its hard cases.
@@ -175,7 +175,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Leave clearly marked places for screenshots and a demo GIF (taken in the final local session).
 - Done when: links in it resolve to real files.
 
-### [ ] T12. Stop
+### [x] T12. Stop
 When T0–T11 are all `[x]` or `[blocked]`, write `ALL DONE` as the last Log entry. Every later run
 reads it and does nothing. The final local check, merging into `main` and going online are done
 with Parth, not by autopilot.
@@ -224,3 +224,5 @@ with Parth, not by autopilot.
 - 2026-11-19 14:58 UTC — STARTED T10 (autopilot)
 - 2026-11-19 15:02 UTC — T10 done (autopilot). `scripts/dev.sh` starts Postgres (`docker compose up -d --wait`), the API and the website, installs missing venv/node_modules, stops everything on Ctrl+C (KEEP_DB=1 keeps the database). Tables are created by the API on startup from `api/db/*.sql`, so the script does not apply them. README run section uses it. `bash -n` passes. Manual check added.
 - 2026-11-19 15:03 UTC — STARTED T11 (autopilot)
+- 2026-11-19 15:10 UTC — T11 done (autopilot). README now leads with what it does and why it is hard, a mermaid pipeline diagram, evaluation summary (offline cases and the writing test set), limits and bring-your-own-key, tech stack; marked places for demo GIF and screenshots (`docs/media/`). All relative links checked to exist. Docs only; evals/lint/build unaffected.
+- 2026-11-19 15:11 UTC — ALL DONE
