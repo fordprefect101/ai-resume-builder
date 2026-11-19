@@ -172,7 +172,7 @@ export function WorkspaceScreen({
 
       <details className="developer-tools">
         <summary>
-          Developer tools{version !== null ? ` · v${version}` : ''}
+          Developer tools (for debugging){version !== null ? ` · v${version}` : ''}
         </summary>
         <div className="developer-toolbar">
           <label>

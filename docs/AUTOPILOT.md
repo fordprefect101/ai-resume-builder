@@ -136,7 +136,7 @@ The analyst returns up to 2 questions (`rewrite.questions`); nothing asks them.
 - Do not print warnings, story text or debug panels.
 - Done when: lint/build pass; manual check added (print preview in Chrome and Safari).
 
-### [ ] T7. Friendly career intelligence panel
+### [x] T7. Friendly career intelligence panel
 - Rename and explain in plain words: "Tailor to a job" (paste a job description → a version for
   that job), "Why is this line here?" (shows the facts behind a line — fact content only, not the
   person's raw story), "History" (readable times and what changed, with restore).
@@ -192,6 +192,7 @@ with Parth, not by autopilot.
 - T4: with a real key, finish a job by voice so the writing team returns questions. Open a new call: the assistant asks them one at a time (max 2 per entry), accepts "I don't know", and your spoken answer lands in the story (`source: "followup"`), then the points rewrite after the call. In text mode the questions show under the entry with Answer / Skip.
 - T5: with a real key, make the writing team simplify a line: the entry shows a warning under it. Edit that line by chat ("change that point to …"): the warning goes. Saving and the preview/download are never blocked, and the resume page shows no warning.
 - T6: print preview (Chrome and Safari) of the resume: only the resume page shows, on A4 and US Letter, text is selectable in the saved PDF, entries do not split across pages, no warnings/story/debug panels. As a guest, "Download PDF" asks to log in first.
+- T7: open the left panel: it reads "Change your resume in plain words"; "Tailor to a job" makes a version; "Why is this line here?" shows only fact text (no raw story); "History" shows readable times and restore works. "Developer tools (for debugging)" is closed by default and holds the JSON and event log.
 
 ## Log
 
@@ -213,3 +214,4 @@ with Parth, not by autopilot.
 - 2026-11-19 10:58 UTC — STARTED T6 (autopilot)
 - 2026-11-19 11:05 UTC — T6 done (autopilot). "Download PDF" button in the workspace toolbar (guests are asked to log in first, like Save) calls the browser print; print stylesheet in web/src/styles/app.css shows only `.resume-paper`, @page margins fit A4 and Letter, page breaks kept between entries. Preview never renders warnings/story. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
 - 2026-11-19 11:59 UTC — STARTED T7 (autopilot)
+- 2026-11-19 12:05 UTC — T7 done (autopilot). IntelligencePanel rewritten in plain words: "Tailor to a job", "Why is this line here?" (fact content only), "History" (readable times, go back); the technical messages renamed; JSON console and event log stay inside the closed "Developer tools (for debugging)" toggle. No offline eval (browser-only). Evals 46/46, lint clean, build passes. Manual check added.
