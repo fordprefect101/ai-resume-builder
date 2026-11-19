@@ -8,6 +8,8 @@ task, and records what happened. Written 2026-11-19 from Parth's product decisio
 1. Work on branch `claude/autopilot`. Start with `git pull --rebase`.
 2. Read **Decisions** and **Rules** below, then the **Log** (the last entry may be a task left half done).
 3. Pick the first task that is not `[x]` or `[blocked]`. If it shows `Progress:` notes, continue from them.
+   Before any other work, add a Log entry `- <date> <HH:MM> UTC — STARTED <task id> (<who: autopilot
+   or interactive>)`, commit and push it. This tells Parth (and other runs) that work has begun.
 4. Set up only what the task needs:
    - API: `python3 -m venv api/.venv && api/.venv/bin/pip install -r api/requirements.txt`
    - Web: `cd web && npm ci`
