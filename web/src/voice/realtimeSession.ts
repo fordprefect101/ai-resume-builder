@@ -5,6 +5,7 @@ export type RealtimeHandles = {
   dc: RTCDataChannel
   mode: 'intake' | 'edit'
   stop: () => void
+  waitForSilence: (maxMs?: number) => Promise<void>
 }
 
 export async function startRealtimeSession(
@@ -37,9 +38,13 @@ export async function startRealtimeSession(
   dc.addEventListener('open', () => {
     dc.send(JSON.stringify({ type: 'response.create' }))
   })
+  let speaking = false
   dc.addEventListener('message', (e) => {
     try {
       const event = JSON.parse(e.data as string) as Record<string, unknown>
+      if (event.type === 'output_audio_buffer.started') speaking = true
+      if (event.type === 'output_audio_buffer.stopped' || event.type === 'output_audio_buffer.cleared')
+        speaking = false
       onEvent(event)
     } catch {
       // ignore non-JSON
@@ -64,6 +69,18 @@ export async function startRealtimeSession(
   const answer = { type: 'answer' as const, sdp: await sdpResponse.text() }
   await pc.setRemoteDescription(answer)
 
+  // Resolves once the assistant is not speaking (goodbye finished), or after maxMs.
+  const waitForSilence = (maxMs = 15000) =>
+    new Promise<void>((resolve) => {
+      const started = Date.now()
+      const tick = () => {
+        if (!speaking || Date.now() - started > maxMs) resolve()
+        else window.setTimeout(tick, 250)
+      }
+      // Give the goodbye a moment to start before checking.
+      window.setTimeout(tick, 800)
+    })
+
   const stop = () => {
     dc.close()
     pc.close()
@@ -71,5 +88,5 @@ export async function startRealtimeSession(
     audioEl.remove()
   }
 
-  return { pc, dc, mode, stop }
+  return { pc, dc, mode, stop, waitForSilence }
 }

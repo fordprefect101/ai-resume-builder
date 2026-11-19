@@ -219,12 +219,20 @@ export function resultForAssistant(output: unknown): Record<string, unknown> {
   return { ok: true }
 }
 
+// Tool calls still running. The call must never be hung up while this is above 0.
+let runningTools = 0
+
+export function toolsAreRunning(): boolean {
+  return runningTools > 0
+}
+
 export async function handleToolCallEvent(
   dc: RTCDataChannel,
   sessionId: string,
   event: Record<string, unknown>,
   onResult?: (result: unknown) => void,
-  onTiming?: (timing: ToolTiming) => void
+  onTiming?: (timing: ToolTiming) => void,
+  onEndRequest?: () => void
 ) {
   if (event.type !== 'response.function_call_arguments.done') return
   const started = performance.now()
@@ -236,11 +244,21 @@ export async function handleToolCallEvent(
   }
   if (!call.call_id || !call.name) return
 
+  // Hanging up is handled in the browser: nothing to run on the server, and no reply is
+  // sent to the model because the call is about to close.
+  if (call.name === 'end_voice_session') {
+    onEndRequest?.()
+    return
+  }
+
   let output: unknown
+  runningTools += 1
   try {
     output = await runResumeTool(sessionId, call.name, call.arguments)
   } catch (err) {
     output = { error: err instanceof Error ? err.message : 'tool failed' }
+  } finally {
+    runningTools -= 1
   }
 
   onResult?.(output)

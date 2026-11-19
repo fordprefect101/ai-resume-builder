@@ -273,6 +273,23 @@ COMPLETE_INTAKE_TOOL = {
     },
 }
 
+# Voice only: hangs up the call. Typed chat is not offered it (nothing to hang up).
+END_VOICE_SESSION_TOOL = {
+    "type": "function",
+    "name": "end_voice_session",
+    "description": (
+        "End the voice call. Say a short goodbye first, then call this. Use it when "
+        "intake is complete (after complete_intake), the person says they are done, "
+        "or an edit request is finished and they have nothing more. Never call it "
+        "while another tool call is still running."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+}
+
 TOOL_DEFINITIONS.extend([ADD_PROJECT_TOOL, *EDIT_PROJECT_TOOLS])
 
 INTAKE_TOOL_DEFINITIONS = [
@@ -289,6 +306,11 @@ def tools_for_payload(payload: dict) -> list[dict]:
         if is_intake_in_progress(payload)
         else TOOL_DEFINITIONS
     )
+
+
+def voice_tools_for_payload(payload: dict) -> list[dict]:
+    """The tools of the voice call: the chat tools plus the one that ends the call."""
+    return [*tools_for_payload(payload), END_VOICE_SESSION_TOOL]
 
 
 def execute_tool(payload: dict, name: str, arguments: dict) -> tuple[dict, dict]:

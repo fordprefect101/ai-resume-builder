@@ -27,7 +27,7 @@ import {
   type ResumePayload,
 } from './types/resume'
 import { startRealtimeSession, type RealtimeHandles } from './voice/realtimeSession'
-import { handleToolCallEvent } from './voice/handleRealtimeTools'
+import { handleToolCallEvent, toolsAreRunning } from './voice/handleRealtimeTools'
 import './styles/app.css'
 
 // Voice events that mean the assistant's reply has started playing. With a WebRTC
@@ -231,7 +231,8 @@ function App() {
                   `${timing.charsToAssistant.toLocaleString()} characters handed to the assistant` +
                   (timing.ok ? '' : ' (failed)')
               )
-            }
+            },
+            () => void endCallWhenQuiet(holder.current)
           )
         }
       })
@@ -269,6 +270,21 @@ function App() {
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Could not start')
     }
+  }
+
+  // The assistant asked to hang up: let the goodbye finish and any tool call end, then stop
+  // exactly as the button does.
+  async function endCallWhenQuiet(handles: RealtimeHandles | null) {
+    if (!handles) return
+    for (let i = 0; i < 40; i += 1) {
+      await handles.waitForSilence()
+      if (!toolsAreRunning()) break
+      await new Promise((resolve) => window.setTimeout(resolve, 250))
+    }
+    if (voiceRef.current !== handles) return // already stopped by the button
+    handleStopVoice()
+    setStatus('Call ended')
+    setVoice('done', 'All done — your resume is ready to review.')
   }
 
   function handleStopVoice() {

@@ -69,7 +69,7 @@ At setup, `npm run lint` failed with 2 errors (build passed): `react-hooks/set-s
   disable the rule. Behaviour must stay the same.
 - Done when: all checks pass.
 
-### [ ] T1. Voice ends the call by itself
+### [x] T1. Voice ends the call by itself
 Today the call only ends when the person presses the button; `complete_intake` does not stop it.
 - Add a voice-only tool `end_voice_session` (not offered to text chat). Tell the assistant in
   `api/realtime.py` instructions to say a short goodbye and call it when: intake is complete
@@ -184,6 +184,10 @@ with Parth, not by autopilot.
 
 (Things to try in the final local session with a real key, a microphone and a browser.)
 
+- T1: finish an intake by voice: the assistant says goodbye, the call ends by itself after the goodbye
+  audio (not mid-sentence), and the screen shows "All done". Also say "that's all" in edit mode. The
+  stop button must still work. Check it never hangs up while a tool is running.
+
 ## Log
 
 - 2026-11-19 — Autopilot set up from `writing-team`. Offline evals 42/42 pass; web build passes;
@@ -192,3 +196,4 @@ with Parth, not by autopilot.
   they started from; useContactStatus derives `checking` instead of setting it in an effect.
   Lint 0 errors, build passes, evals 42/42.
 - 2026-11-19 06:14 UTC — STARTED T1 (autopilot)
+- 2026-11-19 06:30 UTC — T1 done (autopilot). New voice-only tool `end_voice_session` (api/chat_tools.py `voice_tools_for_payload`, not in chat); instructions in api/realtime.py (`END_CALL_RULE`); browser waits for goodbye audio and running tools, then calls the button's stop. New eval `voice_can_end_call`. Evals 43/43, lint clean, build passes. Manual check added.

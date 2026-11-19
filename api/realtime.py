@@ -5,7 +5,7 @@ import urllib.request
 
 from dotenv import load_dotenv
 
-from chat_tools import tools_for_payload
+from chat_tools import voice_tools_for_payload
 from context_selector import resume_context_summary
 from resume_ops import intake_context, is_intake_in_progress
 
@@ -13,6 +13,14 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini")
+
+
+END_CALL_RULE = (
+    "ENDING THE CALL: when intake is complete (right after complete_intake), when the "
+    "person says they are done, or when an edit request is finished and they have "
+    "nothing more, say a short goodbye and then call end_voice_session. Never call "
+    "end_voice_session in the same turn as another tool; wait for that tool's result first."
+)
 
 
 def create_realtime_client_secret(payload: dict) -> dict:
@@ -43,7 +51,8 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "If the user has nothing for an entire section, explicitly confirm the skip. "
             "Call complete_intake only after skills and all four sections were "
             "addressed; pass every confirmed skipped section. Do not invent facts. "
-            "Tool outputs contain refreshed persisted intake context; treat them as truth."
+            "Tool outputs contain refreshed persisted intake context; treat them as truth. "
+            + END_CALL_RULE
         )
     else:
         instructions = (
@@ -64,7 +73,8 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "archive_project and reorder_projects, using the job's itemId and the "
             "projectId that search_resume_context returns. reorder_projects needs every "
             "active projectId of that job. Archiving keeps a project's points. "
-            "Prefer soft exclude over deletion."
+            "Prefer soft exclude over deletion. "
+            + END_CALL_RULE
         )
 
     body = {
@@ -73,7 +83,7 @@ def create_realtime_client_secret(payload: dict) -> dict:
             "type": "realtime",
             "model": REALTIME_MODEL,
             "instructions": instructions,
-            "tools": tools_for_payload(payload),
+            "tools": voice_tools_for_payload(payload),
             "audio": {
                 "input": {
                     "transcription": {

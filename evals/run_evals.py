@@ -1424,6 +1424,39 @@ def get_item_for_test(payload: dict, section: str, item_id: str) -> dict:
     return next(i for i in payload["inventory"]["sections"][section]["items"] if i["id"] == item_id)
 
 
+def test_voice_can_end_call() -> bool:
+    """Only the voice call gets end_voice_session, and its instructions say when to use it."""
+    import chat_tools
+    import realtime
+
+    problems = []
+    for label, payload in (
+        ("intake", {"intake": {"status": "in_progress"}}),
+        ("edit", load_raw_fixture("sample_career.json")),
+    ):
+        voice = {t["name"] for t in chat_tools.voice_tools_for_payload(payload)}
+        chat = {t["name"] for t in chat_tools.tools_for_payload(payload)}
+        if "end_voice_session" not in voice:
+            problems.append(f"{label}: voice tools lack end_voice_session")
+        if "end_voice_session" in chat:
+            problems.append(f"{label}: text chat is offered end_voice_session")
+    if "end_voice_session" in {t["name"] for t in chat_tools.TOOL_DEFINITIONS}:
+        problems.append("end_voice_session is in the shared tool list")
+    rule = realtime.END_CALL_RULE
+    for needle in ("end_voice_session", "complete_intake", "goodbye", "done"):
+        if needle not in rule:
+            problems.append(f"end-call rule does not mention {needle!r}")
+    src = (ROOT / "api" / "realtime.py").read_text()
+    if src.count("END_CALL_RULE") < 3:
+        problems.append("both modes' instructions must include END_CALL_RULE")
+    ts = (ROOT / "web" / "src" / "voice" / "handleRealtimeTools.ts").read_text()
+    if "toolsAreRunning" not in (ROOT / "web" / "src" / "App.tsx").read_text():
+        problems.append("the app does not wait for running tool calls before hanging up")
+    ok = not problems
+    print(f"voice_can_end_call: {'PASS' if ok else 'FAIL'} (problems={problems})")
+    return ok
+
+
 def test_single_save_door() -> bool:
     """No code outside the two shared functions may write a stored resume."""
     allowed = {
@@ -3906,6 +3939,7 @@ def main() -> int:
         test_voice_add_entry_end_to_end,
         test_assistant_result_is_small_and_constant,
         test_live_path_guard,
+        test_voice_can_end_call,
         test_single_save_door,
         test_example_record_is_current,
         test_env_example_lists_settings,
